@@ -51,18 +51,29 @@ function selectedFormat() {
 function currentOptions() {
   const f = selectedFormat();
   const jex = f === "jex";
+  if (jex) optEmbedded.checked = false;
   const embeddedMd = optEmbedded.checked || jex;
   return {
-    format: f, md: jex || f !== "html", html: !jex && f !== "md", images: optImages.checked, files: optFiles.checked, json: optJson.checked,
-    embeddedMd, modernEmbeddedMd: jex, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
+    format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked,
+    embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
+}
+
+function updateFormatUI() {
+  const jex = selectedFormat() === "jex";
+  document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
+  $("jex-note").hidden = !jex;
+  if (jex) optEmbedded.checked = false;
+  refreshButtons();
+  checkPermission();
 }
 
 function saveOptions() {
   try {
     localStorage.setItem("cgx-options", JSON.stringify(currentOptions()));
   } catch (_) {}
+  updateFormatUI();
   refreshButtons();
   checkPermission();
 }
@@ -179,5 +190,6 @@ optEmbedded.addEventListener("change", () => {
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
 loadOptions();
+updateFormatUI();
 checkPermission();
 init();
