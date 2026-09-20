@@ -2,7 +2,7 @@
 // Images are not downloaded here: each image receives a CGXIMG<n>Z marker,
 // later replaced with a local path or remote URL (see content.js).
 (() => {
-  const ROLE_LABELS = { user: "User", assistant: "ChatGPT" };
+  const ROLE_LABELS = { user: "User", assistant: "ChatGPT", thinking: "Thinking" };
   const PUA = /[\uE200-\uE2FF]/;
   const markedLib = globalThis.marked;
 
@@ -326,7 +326,22 @@
 
   // ---------- Rendu d’un message ----------
 
-  function renderMessage(msg, ctx) {
+  function thinkingSeconds(text) {
+    const source = String(text || '').toLowerCase().replace(',', '.');
+    let total = 0;
+    for (const match of source.matchAll(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hour|hours|heure|heures|m|min|mins|minute|minutes|s|sec|secs|second|seconds|seconde|secondes)/gi)) {
+      const value = Number(match[1]);
+      const unit = match[2];
+      total += /^(h|hr|hrs|hour|hours|heure|heures)$/.test(unit) ? value * 3600 : /^(m|min|mins|minute|minutes)$/.test(unit) ? value * 60 : value;
+    }
+    return total;
+  }
+
+  function isThinkingDurationOnly(text) {
+    return /^(?:worked|thought|reasoned|réfléchi|reflechi|temps de réflexion|thinking)\s*(?:for|pendant|:)?\s*\d+(?:[.,]\d+)?\s*(?:h|hr|hrs|hour|hours|heure|heures|m|min|mins|minute|minutes|s|sec|secs|second|seconds|seconde|secondes)$/i.test(String(text || '').trim().replace(/^\*+|\*+$/g, ''));
+  }
+
+  function renderMessage(msg, ctx, options = {}) {
     const role = msg.author.role === "user" ? "user" : "assistant";
     const c = msg.content || {};
     const refs = (msg.metadata && msg.metadata.content_references) || [];
@@ -383,10 +398,8 @@
         }
         break;
       case "reasoning_recap":
-        if (typeof c.content === "string" && c.content.trim()) {
-          mdParts.push(`*${c.content.trim()}*`);
-          htmlParts.push(`<div class="thought">${esc(c.content.trim())}</div>`);
-        }
+        if (!options.thinking) return null;
+        if (typeof c.content === "string" && c.content.trim()) return { kind: "thinking", text: c.content.trim(), seconds: thinkingSeconds(c.content) };
         break;
       case "code":
         if (c.text) addText("```" + (c.language && c.language !== "unknown" ? c.language : "") + "\n" + c.text + "\n```");
@@ -461,15 +474,39 @@
     return d ? d.toLocaleString("en-US") : "unknown date";
   }
 
-  function buildTurns(conv, ctx, nodeId = null) {
+  function buildTurns(conv, ctx, nodeId = null, options = {}) {
     const turns = [];
+    const thinking = [];
+    let totalThinkingSeconds = 0;
     for (const msg of linearize(conv, nodeId)) {
       if (!isVisible(msg)) continue;
-      const r = renderMessage(msg, ctx);
+      const r = renderMessage(msg, ctx, options);
       if (!r) continue;
+      if (r.kind === "thinking") {
+        totalThinkingSeconds += r.seconds || 0;
+        if (!isThinkingDurationOnly(r.text)) thinking.push(r.text);
+        continue;
+      }
       turns.push({ role: r.role, md: [r.md], html: [r.html], messageId: msg.id || null, createdAt: msg.create_time || null });
     }
+    if (options.thinking && (thinking.length || totalThinkingSeconds)) {
+      const duration = totalThinkingSeconds ? `*Total thinking time: ${formatThinkingDuration(totalThinkingSeconds)}*` : '';
+      const htmlDuration = totalThinkingSeconds ? `<p><em>Total thinking time: ${esc(formatThinkingDuration(totalThinkingSeconds))}</em></p>` : '';
+      turns.push({ role: "thinking", md: [[duration, ...thinking].filter(Boolean).join("\n\n")], html: [`${htmlDuration}${thinking.map((text) => `<div class="thought">${esc(text)}</div>`).join("\n")}`], messageId: null, createdAt: null });
+    }
     return turns;
+  }
+
+  function formatThinkingDuration(seconds) {
+    const value = Math.round(seconds);
+    const parts = [];
+    const hours = Math.floor(value / 3600);
+    const minutes = Math.floor((value % 3600) / 60);
+    const rest = value % 60;
+    if (hours) parts.push(`${hours}h`);
+    if (minutes) parts.push(`${minutes}m`);
+    if (rest || !parts.length) parts.push(`${rest}s`);
+    return parts.join(' ');
   }
 
   function branchLeaves(conv) {
@@ -497,11 +534,11 @@
   function toHtml(conv, turns) {
     const title = conv.title || "Untitled";
     const body = turns
-      .map((t) =>
-        t.role === "user"
-          ? `<section class="turn user" aria-label="${ROLE_LABELS.user}"><div class="turn-label">${ROLE_LABELS.user}</div><div class="bubble">${t.html.join("\n")}</div></section>`
-          : `<section class="turn assistant" aria-label="${ROLE_LABELS.assistant}"><div class="turn-label">${ROLE_LABELS.assistant}</div><div class="body">${t.html.join("\n")}</div></section>`
-      )
+      .map((t) => t.role === "user"
+        ? `<section class="turn user" aria-label="${ROLE_LABELS.user}"><div class="turn-label">${ROLE_LABELS.user}</div><div class="bubble">${t.html.join("\n")}</div></section>`
+        : t.role === "thinking"
+          ? `<section class="turn thinking" aria-label="${ROLE_LABELS.thinking}"><div class="turn-label">${ROLE_LABELS.thinking}</div><div class="body">${t.html.join("\n")}</div></section>`
+          : `<section class="turn assistant" aria-label="${ROLE_LABELS.assistant}"><div class="turn-label">${ROLE_LABELS.assistant}</div><div class="body">${t.html.join("\n")}</div></section>`)
       .join("\n");
     return `<!doctype html>
 <html lang="en">
@@ -564,7 +601,7 @@ header.conv p{margin:2px 0 0;color:var(--muted);font-size:13px}
 .bubble .plain{white-space:pre-wrap;overflow-wrap:anywhere}
 .bubble figure{margin:6px 0}
 .bubble img{max-width:100%;border-radius:16px}
-.thought{color:var(--muted);font-size:15px;margin-bottom:12px}
+.thought{color:var(--muted);font-size:15px;margin-bottom:12px}.thinking{border-left:3px solid var(--accent);padding-left:16px;opacity:.9}
 .body{overflow-wrap:break-word}
 .body p{margin:0 0 16px}
 .body strong{font-weight:600}

@@ -8,6 +8,7 @@ const status = $("status");
 const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
+const optThinking = $("opt-thinking");
 const optEmbedded = $("opt-embedded-md");
 const optFiles = $("opt-files");
 const optBranches = $("opt-branches");
@@ -31,6 +32,7 @@ function loadOptions() {
   formatInputs.forEach((el) => (el.checked = el.value === format));
   optImages.checked = saved.images ?? true;
   optJson.checked = saved.json ?? false;
+  optThinking.checked = saved.thinking ?? false;
   optEmbedded.checked = saved.embeddedMd ?? false;
   if (saved.modernEmbeddedMd) {
     const jex = formatInputs.find((el) => el.value === "jex");
@@ -54,7 +56,7 @@ function currentOptions() {
   if (jex) optEmbedded.checked = false;
   const embeddedMd = optEmbedded.checked || jex;
   return {
-    format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked,
+    format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked, thinking: optThinking.checked,
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
@@ -183,7 +185,7 @@ api.runtime.onMessage.addListener((msg) => {
   setStatus(`Conversation ${Math.min(msg.done + 1, msg.total)} of ${msg.total}…`);
 });
 
-[...formatInputs, optImages, optFiles, optJson, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 optEmbedded.addEventListener("change", () => {
   saveOptions();
 });

@@ -65,6 +65,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Save images | Downloads images when accessible. |
 | Save attachments | Preserves documents and generated files. |
 | Standard self-contained Markdown | Adds an `.embedded.md` file with resources encoded as Base64. |
+| Include thinking summaries | Off by default. When enabled, visible ChatGPT thinking summaries are grouped into one `Thinking` section with a total duration. Hidden chain-of-thought is never exported. |
 | Raw JSON data | Adds the source conversation JSON. |
 | All branches | Includes available regenerations and branches. |
 | Incremental export | Skips unchanged conversations from previous exports. |

@@ -335,7 +335,7 @@
       project_id:source.projectId||null, project_title:source.projectTitle||null,
       archived:!!source.archived, shared:!!source.shared, share_id:source.shareId||null,
       workspace_id:source.accountId||null,
-      export_formats:{markdown:!!opts.md,html:!!opts.html,embedded_markdown:!!opts.embeddedMd,raw_json:!!opts.json},
+      export_formats:{markdown:!!opts.md,html:!!opts.html,embedded_markdown:!!opts.embeddedMd,raw_json:!!opts.json,thinking_summaries:!!opts.thinking},
       capability_snapshot: capabilitySnapshot()
     };
   }
@@ -346,14 +346,14 @@
     if (conv && conv.conversation) conv=conv.conversation;
     conv.conversation_id=conv.conversation_id||conv.id||convId;
     const ctx=CGX.createContext();
-    const currentTurns=CGX.buildTurns(conv,ctx,conv.current_node);
+    const currentTurns=CGX.buildTurns(conv,ctx,conv.current_node,opts);
     const leaves=opts.branches ? CGX.branchLeaves(conv) : [conv.current_node].filter(Boolean);
     const branchData=[];
     if (opts.branches && leaves.length>1) {
       let n=0;
       for (const nodeId of leaves) {
         if (nodeId===conv.current_node) continue;
-        const turns=CGX.buildTurns(conv,ctx,nodeId);
+        const turns=CGX.buildTurns(conv,ctx,nodeId,opts);
         if (turns.length) branchData.push({nodeId, n:++n, turns});
       }
     }
@@ -696,7 +696,7 @@
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.'});return false;}
-    const opts={md:true,html:true,images:true,files:true,json:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
+    const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
     opts.modernEmbeddedMd = opts.format === 'jex' || !!opts.modernEmbeddedMd;
     opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
