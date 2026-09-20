@@ -75,7 +75,7 @@ When **Self-contained Markdown** is the only save option, the current conversati
 
 The standard self-contained format keeps the export as plain Markdown with embedded Base64 resources. The Modern Joplin Markdown format adds the metadata fields supported by Joplin, including title, creation/update dates, source, author, and tags. It keeps images and files as local relative resources inside the ZIP instead of putting large Data URIs in the note, which is safer for Joplin.
 
-Use **Modern Joplin Markdown** when importing into Joplin. Unzip the generated archive first, then import the extracted Markdown folder in Joplin. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably.
+Use **Modern Joplin Markdown** when importing into Joplin. Unzip the generated archive first, then import the extracted Markdown folder in Joplin. Joplin will store the note, images, and files in its own database, so the final note is self-contained in Joplin without external links. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably, not for large Joplin notes.
 
 Access to all websites is optional. It is requested only when the extension needs to retrieve images or files hosted outside ChatGPT. Without this permission, the main export still works and preserves remote links when necessary.
 
