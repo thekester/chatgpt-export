@@ -209,18 +209,20 @@
     let out=String(markdown||'');
     // Les documents de branche peuvent utiliser ../images/... alors que le document principal
     // utilise images/.... On remplace les deux formes, ainsi que ./... .
-    const entries=[];
-    for(const f of assetFiles){
-      let rel=f.name;
-      if(prefix && rel.startsWith(prefix)) rel=rel.slice(prefix.length);
-      if(!/^(?:images|files)\//.test(rel)) continue;
-      entries.push({rel,uri:dataUri(f)});
+    if (!modern) {
+      const entries=[];
+      for(const f of assetFiles){
+        let rel=f.name;
+        if(prefix && rel.startsWith(prefix)) rel=rel.slice(prefix.length);
+        if(!/^(?:images|files)\//.test(rel)) continue;
+        entries.push({rel,uri:dataUri(f)});
+      }
+      entries.sort((a,b)=>b.rel.length-a.rel.length);
+      for(const {rel,uri} of entries){
+        for(const candidate of [`../${rel}`,`./${rel}`,rel]) out=out.split(candidate).join(uri);
+      }
+      return out;
     }
-    entries.sort((a,b)=>b.rel.length-a.rel.length);
-    for(const {rel,uri} of entries){
-      for(const candidate of [`../${rel}`,`./${rel}`,rel]) out=out.split(candidate).join(uri);
-    }
-    if (!modern) return out;
     const title = conv && conv.title ? conv.title : 'Untitled';
     const created = joplinDate(conv && conv.create_time);
     const updated = joplinDate(conv && conv.update_time);
@@ -241,7 +243,7 @@
       '',
       '> **ChatGPT export**',
       '>',
-      '> This note is formatted for Joplin. Images and files are embedded directly as MIME/Base64 Data URIs.',
+      '> This note is formatted for Joplin. Images and files are kept as local resources next to the note.',
       '',
     ].join('\n');
     const body = out.replace(/^# [^\r\n]*(?:\r?\n){1,2}/, '');
@@ -458,7 +460,7 @@
       const conv=conversationFromDom(target.id);
       r=await exportConversation(conv.conversation_id,opts,'',{accountId,shared:target.type==='share',shareId:target.type==='share'?target.id:null},conv);
     }
-    const embeddedOnly = opts.embeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
+    const embeddedOnly = opts.embeddedMd && !opts.modernEmbeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
     if (embeddedOnly) {
       const embedded = r.files.find(f => /(?:\.embedded\.md|\.modern\.joplin\.md)$/i.test(f.name));
       if (!embedded) throw new Error('Self-contained Markdown could not be generated.');
