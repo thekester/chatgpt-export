@@ -294,7 +294,7 @@
     return {
       schema_version:2,
       conversation_id:conv.conversation_id||conv.id||null,
-      title:conv.title||'Sans titre',
+      title:conv.title||'Untitled',
       created_at:conv.create_time||null,
       updated_at:conv.update_time||null,
       exported_at:new Date().toISOString(),
@@ -561,7 +561,7 @@
         const rBytes=r.files.reduce((n,f)=>n+sizeOf(f),0);
         if(files.length&&bytes+rBytes>maxBytes)await flush();
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
-        index.push({title:r.conv.title||'Sans titre',href:`${prefix}conversation.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
+        index.push({title:r.conv.title||'Untitled',href:`${prefix}conversation.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
       }catch(e){errors.push(`${item.title||id} : ${e.message}`);}
       await sleep(DELAY_MS);

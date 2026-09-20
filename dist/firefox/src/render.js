@@ -2,7 +2,7 @@
 // Images are not downloaded here: each image receives a CGXIMG<n>Z marker,
 // later replaced with a local path or remote URL (see content.js).
 (() => {
-  const ROLE_LABELS = { user: "Utilisateur", assistant: "ChatGPT" };
+  const ROLE_LABELS = { user: "User", assistant: "ChatGPT" };
   const PUA = /[\uE200-\uE2FF]/;
   const markedLib = globalThis.marked;
 
@@ -443,14 +443,7 @@
       }
     }
 
-    const when = formatDate(msg.create_time);
-    const model = (msg.metadata && (msg.metadata.model_slug || msg.metadata.default_model_slug)) || "";
-    if (msg.create_time || model) {
-      mdParts.push(`*${when}${model ? ` · ${model}` : ""}*`);
-      htmlParts.push(`<div class="msgmeta">${esc(when)}${model ? ` · ${esc(model)}` : ""}</div>`);
-    }
-
-    if (!mdParts.length && !htmlParts.length) return null;
+    if (!mdParts.some((part) => String(part).trim()) && !htmlParts.some((part) => String(part).trim())) return null;
     return { role, md: mdParts.join("\n\n"), html: htmlParts.join("\n") };
   }
 
@@ -493,15 +486,13 @@
   }
 
   function toMarkdown(conv, turns) {
-    const lines = [`# ${conv.title || "Sans titre"}`, ""];
-    lines.push(`> Created ${formatDate(conv.create_time)}, updated ${formatDate(conv.update_time)}`);
-    lines.push(`> ID: ${conv.conversation_id || conv.id || "unknown"}`, "");
+    const lines = [`# ${conv.title || "Untitled"}`, ""];
     for (const t of turns) lines.push(`## ${ROLE_LABELS[t.role]}`, "", t.md.join("\n\n"), "");
     return lines.join("\n").trimEnd() + "\n";
   }
 
   function toHtml(conv, turns) {
-    const title = conv.title || "Sans titre";
+    const title = conv.title || "Untitled";
     const body = turns
       .map((t) =>
         t.role === "user"
@@ -510,7 +501,7 @@
       )
       .join("\n");
     return `<!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -519,9 +510,9 @@
 </head>
 <body>
 <main class="page">
-<header class="conv"><h1>${esc(title)}</h1><p>Created ${esc(formatDate(conv.create_time))}, updated ${esc(formatDate(conv.update_time))}</p></header>
+<header class="conv"><h1>${esc(title)}</h1></header>
 ${body}
-<footer>Exported with ChatGPT Markdown Export. ID: <code>${esc(conv.conversation_id || conv.id || "")}</code></footer>
+<footer>Exported with ChatGPT Markdown Export.</footer>
 </main>
 </body>
 </html>
@@ -610,7 +601,6 @@ th[align=center],td[align=center]{text-align:center}
 figure.asset{margin:0 0 16px}
 figure.asset img{max-width:min(100%,600px);border-radius:24px;display:block}
 .attachment{font-size:14px;color:var(--muted)}
-.msgmeta{font-size:11px;color:var(--muted);opacity:.75;margin-top:6px}
 .filecite{font-size:12px;background:var(--chip);color:var(--chip-ink);padding:3px 7px;border-radius:999px;text-decoration:none}
 .index{list-style:none;padding:0;margin:0}
 .index li{display:flex;justify-content:space-between;gap:16px;padding:10px 0;border-bottom:1px solid var(--line)}
