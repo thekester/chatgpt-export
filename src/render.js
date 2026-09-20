@@ -487,7 +487,10 @@
 
   function toMarkdown(conv, turns) {
     const lines = [`# ${conv.title || "Untitled"}`, ""];
-    for (const t of turns) lines.push(`## ${ROLE_LABELS[t.role]}`, "", t.md.join("\n\n"), "");
+    turns.forEach((t, index) => {
+      if (index) lines.push("---", "");
+      lines.push(`> **${ROLE_LABELS[t.role]}**`, "", t.md.join("\n\n"), "");
+    });
     return lines.join("\n").trimEnd() + "\n";
   }
 
@@ -496,8 +499,8 @@
     const body = turns
       .map((t) =>
         t.role === "user"
-          ? `<section class="turn user" aria-label="${ROLE_LABELS.user}"><div class="bubble">${t.html.join("\n")}</div></section>`
-          : `<section class="turn assistant" aria-label="${ROLE_LABELS.assistant}"><div class="body">${t.html.join("\n")}</div></section>`
+          ? `<section class="turn user" aria-label="${ROLE_LABELS.user}"><div class="turn-label">${ROLE_LABELS.user}</div><div class="bubble">${t.html.join("\n")}</div></section>`
+          : `<section class="turn assistant" aria-label="${ROLE_LABELS.assistant}"><div class="turn-label">${ROLE_LABELS.assistant}</div><div class="body">${t.html.join("\n")}</div></section>`
       )
       .join("\n");
     return `<!doctype html>
@@ -553,7 +556,10 @@ header.conv{margin-bottom:40px}
 header.conv h1{font-size:18px;font-weight:600;line-height:1.4;margin:0}
 header.conv p{margin:2px 0 0;color:var(--muted);font-size:13px}
 .turn{margin-bottom:40px}
+.turn-label{margin-bottom:10px;color:var(--muted);font-size:12px;font-weight:700;letter-spacing:.08em;text-transform:uppercase}
+.turn.assistant{border-left:3px solid var(--accent);padding-left:20px}
 .turn.user{display:flex;justify-content:flex-end}
+.turn.user .turn-label{align-self:flex-start;margin:10px 14px 0 0}
 .bubble{background:var(--bubble);color:var(--bubble-ink);padding:10px 20px;border-radius:24px;max-width:70%;line-height:1.6}
 .bubble .plain{white-space:pre-wrap;overflow-wrap:anywhere}
 .bubble figure{margin:6px 0}

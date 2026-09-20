@@ -21,6 +21,7 @@ It works with Chrome, Chromium, Edge, and Firefox without an intermediary server
 - Local HTML index with full-text search, dates, projects, and message counts.
 - DOM fallback for exporting the displayed conversation when the internal API is unavailable.
 - Clean conversation output: empty turns are omitted and per-message model/timestamp lines are not added to Markdown or HTML.
+- Readable turn separators: Markdown uses labeled quote markers and horizontal rules instead of `## User` or `## ChatGPT` sections.
 
 ## Quick installation
 
