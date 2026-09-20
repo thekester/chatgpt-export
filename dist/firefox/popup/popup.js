@@ -16,6 +16,7 @@ const optChecksums = $("opt-checksums");
 const optPartSize = $("opt-part-size");
 const formatInputs = [...document.querySelectorAll('input[name="format"]')];
 const mediaModeInputs = [...document.querySelectorAll('input[name="media-mode"]')];
+const mdHtmlInputs = [...document.querySelectorAll('input[name="md-html"]')];
 const ALL_SITES = { origins: ["<all_urls>"] };
 
 let tabId = null;
@@ -35,6 +36,8 @@ function loadOptions() {
   optThinking.checked = saved.thinking ?? false;
   const mediaMode = saved.embeddedMd ? "embedded" : "links";
   mediaModeInputs.forEach((el) => (el.checked = el.value === mediaMode));
+  const mdHtml = saved.mdHtml === false ? "pure" : "html";
+  mdHtmlInputs.forEach((el) => (el.checked = el.value === mdHtml));
   if (saved.modernEmbeddedMd) {
     const jex = formatInputs.find((el) => el.value === "jex");
     if (jex) jex.checked = true;
@@ -57,6 +60,7 @@ function currentOptions() {
   const embeddedMd = !jex && mediaModeInputs.find((el) => el.checked)?.value === "embedded";
   return {
     format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked, thinking: optThinking.checked,
+    mdHtml: mdHtmlInputs.find((el) => el.checked)?.value !== "pure",
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
@@ -200,7 +204,7 @@ api.runtime.onMessage.addListener((msg) => {
   setStatus(`Conversation ${Math.min(msg.done + 1, msg.total)} of ${msg.total}…`);
 });
 
-[...formatInputs, ...mediaModeInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
 loadOptions();

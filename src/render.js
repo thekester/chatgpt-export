@@ -522,16 +522,121 @@
     return leaves;
   }
 
-  function toMarkdown(conv, turns) {
+  // A user message becomes a one-cell card, bold, left-aligned and sized to its
+  // text. With HTML allowed it is a self-contained one-line <table> block: the
+  // only form that can guarantee the background colour and the left alignment,
+  // since a Markdown table's header cell inherits whatever the viewer's theme
+  // puts on `th`, borders and centring included. Everything the message holds --
+  // sent images, attachments, pasted code and tables -- is rendered inside that
+  // cell, so every question is a card and needs no role label.
+  // The pale blue of the HTML export bubble, kept translucent so it darkens a
+  // light theme and lightens a dark one without forcing a text colour.
+  const QUESTION_CARD_BG = "rgba(59,130,246,.15)";
+  // border:0 and width:auto override the table styling viewers apply by default
+  // (Joplin included), so the card is a plain coloured box sized to its text.
+  // The short bottom padding compensates the last block's own bottom margin.
+  const CARD_TABLE_STYLE = "border-collapse:collapse;border:0;width:auto;max-width:100%;margin:0 0 16px";
+  const CARD_CELL_STYLE = `border:0;border-radius:8px;padding:10px 16px 2px;text-align:left;background:${QUESTION_CARD_BG}`;
+  const ATTACHMENT_LINK = /^\*Attachment: \[(.*)\]\((.*)\)\*$/;
+  const ATTACHMENT_PLAIN = /^\*Attachment: (.*)\*$/;
+  const BARE_LINK = /^\[(.*)\]\((.*)\)$/;
+
+  const isAttachmentLine = (line) => ATTACHMENT_LINK.test(line) || ATTACHMENT_PLAIN.test(line) || BARE_LINK.test(line);
+  const cellPipes = (line) => line.replace(/\|/g, "\\|");
+
+  // Markdown is not parsed inside an HTML block, so the message is rendered to
+  // HTML first. Prose is bolded the way a one-line question is; images, code and
+  // tables keep their normal weight and are sized to fit the card.
+  function cardBodyHtml(markdown) {
+    // breaks: ChatGPT shows a user message as typed, so a single newline is a
+    // real line break and must survive as <br>, not collapse into a space.
+    let html = String(markedLib.parse(String(markdown || "").trim(), { breaks: true }) || "").trim();
+    html = html.replace(/<p>([\s\S]*?)<\/p>/g, '<p style="margin:0 0 8px"><strong>$1</strong></p>');
+    html = html.replace(/<img /g, '<img style="max-width:100%;height:auto;border-radius:8px" ');
+    html = html.replace(/<pre>/g, '<pre style="margin:0 0 8px;white-space:pre-wrap">');
+    html = html.replace(/<table>/g, '<table style="border-collapse:collapse;margin:0 0 8px">');
+    // The card must stay one HTML block, so no newline may survive. Inside a
+    // <pre> the reference still renders as a line break; elsewhere it is just
+    // whitespace.
+    return html.replace(/\r?\n/g, "&#10;");
+  }
+
+  // Splits a message for a Markdown cell, which holds one line of inline
+  // content: `prose` are the plain sentences, `rest` everything that stays
+  // below the card, and `inline` the positions in `rest` that a cell could
+  // still hold -- images and attachment lines -- should there be no prose.
+  function splitProse(content) {
+    const prose = [];
+    const rest = [];
+    const inline = [];
+    let fence = false;
+    for (const raw of String(content).split(/\r?\n/)) {
+      const line = raw.trim();
+      if (/^(```|~~~)/.test(line)) { fence = !fence; rest.push(raw); continue; }
+      if (fence || !line || /^\|/.test(line)) { rest.push(raw); continue; }
+      if (/!\[/.test(line) || isAttachmentLine(line)) { inline.push(rest.length); rest.push(line); continue; }
+      prose.push(line);
+    }
+    return { prose, rest, inline };
+  }
+
+  const proseCard = (line) => [`| **${cellPipes(line)}** |`, "| :--- |", ""];
+  // A promoted line carries its own emphasis already, so it is not bolded.
+  const inlineCard = (line) => [`| ${cellPipes(line)} |`, "| :--- |", ""];
+  // Nothing the cell can hold: an empty card still marks the message as a
+  // question, with its blocks following underneath.
+  const EMPTY_CARD = ["| &nbsp; |", "| :--- |", ""];
+
+  function questionCard(text, allowHtml) {
+    const content = String(text || "").trim();
+    if (!content) return null;
+    if (allowHtml) {
+      return [
+        `<table style="${CARD_TABLE_STYLE}"><tbody><tr><td style="${CARD_CELL_STYLE}">${cardBodyHtml(content)}</td></tr></tbody></table>`,
+        "",
+      ];
+    }
+    // A question typed on several lines becomes several stacked cards. The rest
+    // of the message -- images, attachments, code, pasted tables -- follows them
+    // inside the same pair of rules.
+    const { prose, rest, inline } = splitProse(content);
+    const cards = [];
+    let below = rest;
+    if (prose.length) {
+      for (const line of prose) cards.push(...proseCard(line));
+    } else if (inline.length) {
+      // No sentence at all -- an image dropped on its own, an attachment sent
+      // without a comment: what a cell can hold moves into the card.
+      for (const i of inline) cards.push(...inlineCard(rest[i]));
+      below = rest.filter((_, i) => !inline.includes(i));
+    } else {
+      cards.push(...EMPTY_CARD);
+    }
+    const tail = below.join("\n").trim();
+    return [...cards, ...(tail ? [tail, ""] : [])];
+  }
+
+  function toMarkdown(conv, turns, options = {}) {
+    const allowHtml = options.mdHtml !== false;
     const lines = [`# ${conv.title || "Untitled"}`, ""];
+    // A question card is framed by a horizontal rule above and below: the rule
+    // is plain Markdown, so it sets the question apart even where the viewer
+    // drops the card's colour. `closed` avoids doubling it with the separator
+    // that already sits between two turns.
+    let closed = false;
     turns.forEach((t, index) => {
-      if (index) lines.push("---", "");
       const content = t.md.join("\n\n");
-      if (t.role === "user" && !/[\r\n]/.test(content.trim())) {
-        const question = content.trim().replace(/\|/g, "\\|");
-        lines.push("| **User question** |", "| :--- |", `| ${question} |`, "");
+      const card = t.role === "user" ? questionCard(content, allowHtml) : null;
+      if (card) {
+        if (!closed) lines.push("---", "");
+        lines.push(...card, "---", "");
+        closed = true;
       } else {
-        lines.push(`> **${ROLE_LABELS[t.role]}**`, "", content, "");
+        if (index && !closed) lines.push("---", "");
+        // No role label at all: the card marks the question, and everything
+        // else -- answers and, when kept, thinking summaries -- is plain text.
+        lines.push(content, "");
+        closed = false;
       }
     });
     return lines.join("\n").trimEnd() + "\n";

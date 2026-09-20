@@ -21,8 +21,8 @@ It works with Chrome, Chromium, Edge, and Firefox without an intermediary server
 - Local HTML index with full-text search, dates, projects, and message counts.
 - DOM fallback for exporting the displayed conversation when the internal API is unavailable.
 - Clean conversation output: empty turns are omitted and per-message model/timestamp lines are not added to Markdown or HTML.
-- Readable turn separators: Markdown uses labeled quote markers and horizontal rules instead of `## User` or `## ChatGPT` sections.
-- Simple user questions are displayed as left-aligned one-cell Markdown cards, while complex or multiline user messages remain standard blockquotes.
+- No role labels in Markdown: the card marks the question and everything else is plain text, so `User`, `ChatGPT` and `Thinking` are never written out. When thinking summaries are kept, they read as ordinary text opened by their total duration line.
+- User messages are displayed as a bold, left-aligned one-cell card sized to the text rather than to the page, framed by a horizontal rule above and below so it stands apart even in viewers that drop the card's colour. With **Markdown with HTML elements** the card is a self-contained one-line `<table>` block with a pale blue background and no borders, and the whole message goes inside the cell: sent images, attachments, pasted code and pasted tables included, in their original order and at any length. It is the only form that can guarantee the colour and the alignment, since a Markdown table's header cell inherits whatever the viewer's theme puts on `th`. With **Pure Markdown only** no HTML tag is written: the card is a table whose single row is the header row, shaded by the viewer's own header style, and images, attachments, code and tables follow it inside the same pair of rules. A Markdown cell holds a single line, so a question typed on several lines becomes several stacked cards. A message with no sentence at all still gets one: an image or an attachment sent without a comment moves into the card, and a message holding nothing but pasted code or a pasted table is preceded by an empty card. Every user message is therefore a card in both flavors.
 
 ## Quick installation
 
@@ -65,8 +65,9 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation. |
 | Save images in a separate directory | Downloads images into an `images/` directory inside the export archive and keeps Markdown links to them. |
 | Save attachments and generated files in a separate directory | Preserves documents and generated files in a `files/` directory inside the export archive and keeps Markdown links to them. |
+| Markdown flavor | Choose **Markdown with HTML elements** or **Pure Markdown only**. It controls whether the Markdown file is allowed to contain raw HTML tags, and changes how a user question is rendered (see below). |
 | Markdown images and files | Choose **Keep images and files as links** or **Embed images and files (Base64)**. Normal web links and source citations remain links. Embedding creates an `.embedded.md` file and makes it much larger. |
-| Include thinking summaries | Off by default. When enabled, visible ChatGPT thinking summaries are grouped into one `Thinking` section with a total duration. Hidden chain-of-thought is never exported. |
+| Include thinking summaries | Off by default. When enabled, visible ChatGPT thinking summaries are grouped into one section opened by their total duration. In Markdown they read as ordinary text, with no role label; the HTML export keeps a `Thinking` heading. Hidden chain-of-thought is never exported. |
 | Raw JSON data | Adds the source conversation JSON. |
 | All branches | Includes available regenerations and branches. |
 | Incremental export | Skips unchanged conversations from previous exports. |

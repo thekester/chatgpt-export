@@ -98,6 +98,12 @@
     <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
     <p id="jex-note" class="jex-note" hidden>JEX automatically includes the note, images, attachments, and generated files. Joplin places the imported note in a notebook, usually <em>Imported</em>, because every Joplin note must belong to a notebook. The note follows Joplin’s active light or dark theme.</p>
   </fieldset>
+  <fieldset class="media-mode" aria-label="Markdown flavor">
+    <legend>Markdown flavor</legend>
+    <label><input type="radio" name="md-html" value="html"> Markdown with HTML elements</label>
+    <label><input type="radio" name="md-html" value="pure"> Pure Markdown only</label>
+    <button class="info" type="button" data-help="Markdown with HTML elements renders a user message as a self-contained one-line table block with a pale blue background and no borders, holding the whole message: sent images, attachments, pasted code and pasted tables included. Pure Markdown emits no HTML tag: the question becomes a one-cell table whose header row the viewer shades itself, a question typed on several lines becomes several stacked cards, and images, attachments, code and tables follow them inside the same pair of rules. A message with no sentence at all still gets a card: an image or attachment sent without a comment moves into it. Editors that rewrite Markdown, such as Joplin's Rich Text editor, escape raw HTML; use Pure Markdown there." aria-label="What is the Markdown flavor?">i</button>
+  </fieldset>
   <fieldset class="media-mode jex-hidden" aria-label="Markdown image and file mode">
     <legend>Markdown images and files</legend>
     <label><input type="radio" name="media-mode" value="links" checked> Keep images and files as links</label>
