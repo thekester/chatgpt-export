@@ -8,6 +8,7 @@ const status = $("status");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
 const optEmbedded = $("opt-embedded-md");
+const optModernEmbedded = $("opt-modern-embedded-md");
 const optFiles = $("opt-files");
 const optBranches = $("opt-branches");
 const optIncremental = $("opt-incremental");
@@ -31,6 +32,8 @@ function loadOptions() {
   optImages.checked = saved.images ?? true;
   optJson.checked = saved.json ?? false;
   optEmbedded.checked = saved.embeddedMd ?? false;
+  optModernEmbedded.checked = saved.modernEmbeddedMd ?? false;
+  if (optModernEmbedded.checked) optEmbedded.checked = false;
   optFiles.checked = saved.files ?? true;
   optBranches.checked = saved.branches ?? false;
   optIncremental.checked = saved.incremental ?? false;
@@ -45,10 +48,10 @@ function selectedFormat() {
 
 function currentOptions() {
   const f = selectedFormat();
-  const embeddedMd = optEmbedded.checked;
+  const embeddedMd = optEmbedded.checked || optModernEmbedded.checked;
   return {
     format: f, md: f !== "html", html: f !== "md", images: optImages.checked, files: optFiles.checked, json: optJson.checked,
-    embeddedMd, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
+    embeddedMd, modernEmbeddedMd: optModernEmbedded.checked, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
 }
@@ -81,7 +84,7 @@ function setBusy(b) {
 
 // Images outside chatgpt.com (web search, products) require access to all sites.
 async function checkPermission() {
-  if ((!optImages.checked && !optFiles.checked && !optEmbedded.checked) || !api.permissions) {
+  if ((!optImages.checked && !optFiles.checked && !optEmbedded.checked && !optModernEmbedded.checked) || !api.permissions) {
     btnGrant.hidden = true;
     return;
   }
@@ -157,8 +160,13 @@ api.runtime.onMessage.addListener((msg) => {
   setStatus(`Conversation ${Math.min(msg.done + 1, msg.total)} of ${msg.total}…`);
 });
 
-[...formatInputs, optImages, optFiles, optJson, optEmbedded, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, optImages, optFiles, optJson, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 optEmbedded.addEventListener("change", () => {
+  if (optEmbedded.checked) optModernEmbedded.checked = false;
+  saveOptions();
+});
+optModernEmbedded.addEventListener("change", () => {
+  if (optModernEmbedded.checked) optEmbedded.checked = false;
   saveOptions();
 });
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));

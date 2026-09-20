@@ -355,8 +355,8 @@
       const embedded=[];
       for(const d of docs){
         if(!/\.md$/i.test(d.name) || typeof d.content!=='string') continue;
-        const name=d.name.replace(/\.md$/i,'.embedded.md');
-        embedded.push({name,content:embedAssetsInMarkdown(d.content,assetFiles,prefix),mime:'text/markdown'});
+        const name=d.name.replace(/\.md$/i,opts.modernEmbeddedMd?'.modern.embedded.md':'.embedded.md');
+        embedded.push({name,content:embedAssetsInMarkdown(d.content,assetFiles,prefix,!!opts.modernEmbeddedMd),mime:'text/markdown'});
       }
       docs.push(...embedded);
       if(!opts.md) docs=docs.filter(d=>!/\.md$/i.test(d.name)||/\.embedded\.md$/i.test(d.name));
@@ -439,7 +439,8 @@
     if (embeddedOnly) {
       const embedded = r.files.find(f => /\.embedded\.md$/i.test(f.name));
       if (!embedded) throw new Error('Self-contained Markdown could not be generated.');
-      download(`${r.base}.embedded.md`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
+      const suffix = opts.modernEmbeddedMd ? '.modern.embedded.md' : '.embedded.md';
+      download(`${r.base}${suffix}`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
     }
     r.files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
@@ -586,7 +587,8 @@
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.'});return false;}
-    const opts={md:true,html:true,images:true,files:true,json:false,embeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
+    const opts={md:true,html:true,images:true,files:true,json:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
+    opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.'});return false;}
     busy=true;const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);

@@ -64,7 +64,8 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Markdown / HTML / Both | Selects the output format(s). |
 | Save images | Downloads images when accessible. |
 | Save attachments | Preserves documents and generated files. |
-| Self-contained Markdown | Adds an `.embedded.md` file with resources encoded as Base64. |
+| Standard self-contained Markdown | Adds an `.embedded.md` file with resources encoded as Base64. |
+| Modern self-contained Markdown | Adds a `.modern.embedded.md` file with front matter and a resource notice. |
 | Raw JSON data | Adds the source conversation JSON. |
 | All branches | Includes available regenerations and branches. |
 | Incremental export | Skips unchanged conversations from previous exports. |
@@ -72,7 +73,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 
 When **Self-contained Markdown** is the only save option, the current conversation is downloaded directly as a single `.embedded.md` file, without a ZIP archive. A ZIP is created when another output or save option is enabled. **Save images** and **Save attachments and generated files** remain independent options and create their own `images/` and `files/` directories inside the archive.
 
-Self-contained Markdown files include a small front matter block and a readable notice explaining that their images and files are embedded directly in the document. The rest remains standard Markdown so the file can be opened in any compatible editor.
+The standard self-contained format keeps the export as plain Markdown with embedded resources. The modern format adds a small front matter block and a readable notice explaining that images and files are embedded directly in the document. Both remain compatible with standard Markdown editors.
 
 Access to all websites is optional. It is requested only when the extension needs to retrieve images or files hosted outside ChatGPT. Without this permission, the main export still works and preserves remote links when necessary.
 
