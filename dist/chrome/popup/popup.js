@@ -112,6 +112,7 @@ async function checkPermission() {
       ? "Remove permission to download media hosted outside ChatGPT"
       : "Optional permission to download media hosted outside ChatGPT";
     btnGrant.setAttribute("aria-pressed", String(granted));
+    btnGrant.dataset.granted = String(granted);
   } catch (_) {
     btnGrant.hidden = true;
   }
@@ -119,7 +120,9 @@ async function checkPermission() {
 
 btnGrant.addEventListener("click", async () => {
   try {
-    const granted = await api.permissions.contains(ALL_SITES);
+    // Read the state prepared by checkPermission so request() remains the
+    // first permission API call made from this user-initiated event.
+    const granted = btnGrant.dataset.granted === "true";
     if (granted) {
       const removed = await api.permissions.remove(ALL_SITES);
       setStatus(removed ? "External media permission disabled." : "Permission could not be disabled.", !removed);
