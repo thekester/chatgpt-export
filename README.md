@@ -32,7 +32,7 @@ Ready-to-load builds are generated in `dist/` by the build script:
 python build.py
 ```
 
-The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.1.zip`.
+The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.2.zip`.
 
 ### Chrome, Chromium, and Edge
 
@@ -154,6 +154,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.1**
+Current version: **0.6.2**
 
 This version includes self-contained MIME/Base64 Markdown, ZIP64, multi-browser builds, Projects/Business and sandbox fallbacks, the DOM fallback, incremental export, full-text indexing, checksums, and capability reporting.
