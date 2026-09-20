@@ -183,7 +183,10 @@
       header.set(tarField("00", 2, enc), 263);
       let checksum = 0;
       for (const byte of header) checksum += byte;
-      header.set(tarField(`${checksum}\0 `, 8, enc), 148);
+      // POSIX TAR checksums use six octal digits, a NUL byte, and a space.
+      // Padding this field is important because Joplin validates it strictly.
+      const checksumField = `${checksum.toString(8).padStart(6, "0")}\0 `;
+      header.set(tarField(checksumField, 8, enc), 148);
       chunks.push(header, data);
       const padding = (512 - (data.byteLength % 512)) % 512;
       if (padding) chunks.push(new Uint8Array(padding));
