@@ -1,0 +1,96 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <title>Export conversation</title>
+  <style>
+    :root {
+      --bg: #fbfbfa;
+      --ink: #1d232b;
+      --muted: #5b6573;
+      --line: #dfe3e8;
+      --accent: #2b4c7e;
+      --accent-ink: #ffffff;
+      --error: #a3261c;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #1b1f24;
+        --ink: #e8ebef;
+        --muted: #9aa4b1;
+        --line: #333a43;
+        --accent: #8fb0e0;
+        --accent-ink: #13171c;
+        --error: #f08a80;
+      }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 300px;
+      padding: 16px;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    h1 { font-size: 15px; font-weight: 650; margin: 0 0 4px; }
+    p.lead { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
+    button {
+      display: block;
+      width: 100%;
+      padding: 9px 12px;
+      margin-bottom: 8px;
+      border-radius: 6px;
+      font: inherit;
+      font-weight: 550;
+      text-align: left;
+      cursor: pointer;
+    }
+    #current { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); }
+    #all { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    button:disabled { opacity: .45; cursor: default; }
+    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+    progress { width: 100%; height: 6px; margin-top: 6px; accent-color: var(--accent); }
+    #status { min-height: 1.45em; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
+    #status.error { color: var(--error); }
+    fieldset { border: 0; padding: 0; margin: 0 0 14px; display: grid; gap: 6px; }
+    .formats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .formats label { justify-content: center; padding: 7px 4px; gap: 0; border-left: 1px solid var(--line); }
+    .formats label:first-child { border-left: 0; }
+    .formats input { position: absolute; opacity: 0; pointer-events: none; }
+    .formats label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
+    .formats label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+    label { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
+    input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
+    .number-row { justify-content: space-between; }
+    .number-row input { width: 84px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); }
+    #grant { background: transparent; color: var(--accent); border: 1px dashed var(--accent); font-size: 13px; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <h1>Export conversation</h1>
+  <p class="lead">Text, tables, sources, images, and files.</p>
+  <fieldset class="formats" aria-label="Export format">
+    <label><input type="radio" name="format" value="md"> Markdown</label>
+    <label><input type="radio" name="format" value="html"> HTML</label>
+    <label><input type="radio" name="format" value="both"> Both</label>
+  </fieldset>
+  <fieldset>
+    <label><input type="checkbox" id="opt-images"> Save images</label>
+    <label><input type="checkbox" id="opt-json"> Include raw data (JSON)</label>
+    <label title="Also creates a self-contained .embedded.md file with images and files encoded as MIME/Base64 Data URIs"><input type="checkbox" id="opt-embedded-md"> Self-contained Markdown (MIME/Base64)</label>
+    <label><input type="checkbox" id="opt-files"> Save attachments and generated files</label>
+    <label><input type="checkbox" id="opt-branches"> Export all branches/regenerations</label>
+    <label><input type="checkbox" id="opt-incremental"> Incremental history export</label>
+    <label><input type="checkbox" id="opt-checksums"> SHA-256 checksums in manifest</label>
+    <label class="number-row">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
+  </fieldset>
+  <button id="grant" type="button" hidden>Allow external media</button>
+  <button id="current" type="button">Export this conversation</button>
+  <button id="all" type="button">Export all history (.zip)</button>
+  <progress id="bar" value="0" max="1" hidden></progress>
+  <p id="status" role="status"></p>
+  <script src="popup.js"></script>
+</body>
+</html>
