@@ -5,6 +5,7 @@ const btnAll = $("all");
 const btnGrant = $("grant");
 const bar = $("bar");
 const status = $("status");
+const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
 const optEmbedded = $("opt-embedded-md");
@@ -103,6 +104,15 @@ btnGrant.addEventListener("click", async () => {
     setStatus(e.message, true);
   }
   checkPermission();
+});
+
+document.querySelectorAll(".info").forEach((button) => {
+  button.addEventListener("click", (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    help.textContent = button.dataset.help || "";
+    help.hidden = !help.textContent;
+  });
 });
 
 async function send(msg) {

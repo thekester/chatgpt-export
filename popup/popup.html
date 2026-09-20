@@ -65,6 +65,13 @@
     .number-row { justify-content: space-between; }
     .number-row input { width: 84px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); }
     #grant { background: transparent; color: var(--accent); border: 1px dashed var(--accent); font-size: 13px; }
+    .option { display: flex; align-items: center; gap: 8px; }
+    .option > input { flex: 0 0 auto; }
+    .option > span { flex: 1; }
+    .info { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; margin: 0; border: 1px solid var(--muted); border-radius: 50%; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; text-align: center; cursor: pointer; }
+    .info:hover, .info:focus-visible { border-color: var(--accent); color: var(--accent); }
+    #help { margin: -4px 0 12px; padding: 8px 10px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--muted); font-size: 12px; }
+    .permission-hint { margin: -4px 0 12px; color: var(--muted); font-size: 12px; }
     [hidden] { display: none !important; }
   </style>
 </head>
@@ -77,17 +84,19 @@
     <label><input type="radio" name="format" value="both"> Both</label>
   </fieldset>
   <fieldset>
-    <label><input type="checkbox" id="opt-images"> Save images</label>
-    <label><input type="checkbox" id="opt-json"> Include raw data (JSON)</label>
-    <label title="Creates a standard self-contained .embedded.md file with images and files encoded as MIME/Base64 Data URIs"><input type="checkbox" id="opt-embedded-md"> Standard self-contained Markdown</label>
-    <label title="Creates a Joplin-compatible .modern.joplin.md file with note metadata and embedded resources"><input type="checkbox" id="opt-modern-embedded-md"> Modern Joplin Markdown</label>
-    <label><input type="checkbox" id="opt-files"> Save attachments and generated files</label>
-    <label><input type="checkbox" id="opt-branches"> Export all branches/regenerations</label>
-    <label><input type="checkbox" id="opt-incremental"> Incremental history export</label>
-    <label><input type="checkbox" id="opt-checksums"> SHA-256 checksums in manifest</label>
+    <label class="option"><input type="checkbox" id="opt-images"><span>Save images</span><button class="info" type="button" data-help="Downloads image assets into an images/ directory. It is independent from self-contained Markdown." aria-label="What does Save images do?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-json"><span>Include raw data (JSON)</span><button class="info" type="button" data-help="Adds the original conversation JSON to the export. Useful for backups and future re-rendering." aria-label="What does Include raw data do?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-embedded-md"><span>Standard self-contained Markdown</span><button class="info" type="button" data-help="Creates a plain .embedded.md file with images and files embedded as MIME/Base64 Data URIs." aria-label="What is standard self-contained Markdown?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-modern-embedded-md"><span>Modern Joplin Markdown</span><button class="info" type="button" data-help="Creates a .modern.joplin.md file with Joplin-compatible metadata, tags, and embedded resources." aria-label="What is Modern Joplin Markdown?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-files"><span>Save attachments and generated files</span><button class="info" type="button" data-help="Downloads attachments and sandbox-generated files into a files/ directory. It is independent from self-contained Markdown." aria-label="What does Save attachments do?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-branches"><span>Export all branches/regenerations</span><button class="info" type="button" data-help="Includes alternative response branches and regenerations when ChatGPT exposes them." aria-label="What does Export all branches do?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-incremental"><span>Incremental history export</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>
+    <label class="option"><input type="checkbox" id="opt-checksums"><span>SHA-256 checksums in manifest</span><button class="info" type="button" data-help="Adds a SHA-256 hash for each exported file so the archive can be verified later." aria-label="What do SHA-256 checksums do?">i</button></label>
     <label class="number-row">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
   </fieldset>
-  <button id="grant" type="button" hidden>Allow external media</button>
+  <button id="grant" type="button" hidden title="Optional permission to download media hosted outside ChatGPT">Allow external media</button>
+  <p class="permission-hint">External media permission is only needed for images or files hosted outside ChatGPT, such as web-search and product images.</p>
+  <p id="help" role="status" hidden></p>
   <button id="current" type="button">Export this conversation</button>
   <button id="all" type="button">Export all history (.zip)</button>
   <progress id="bar" value="0" max="1" hidden></progress>
