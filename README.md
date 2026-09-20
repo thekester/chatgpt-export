@@ -76,6 +76,8 @@ The standard self-contained format keeps the export as plain Markdown with embed
 
 Select **JEX** when importing into Joplin. The extension creates a native `.jex` file for the current conversation. Select **File → Import → JEX** and choose that file. Joplin imports the note, images, and files directly into its own database, without external links. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably, not for large Joplin notes. The **Export all history** action remains available for ZIP exports, not JEX.
 
+JEX imports a note, not a standalone file outside Joplin’s notebook structure. Joplin places a note without a specified parent notebook into a default notebook, usually named `Imported`. This is expected Joplin behavior. You can move the note to any existing notebook after import.
+
 Access to all websites is optional. It is requested only when the extension needs to retrieve images or files hosted outside ChatGPT. Without this permission, the main export still works and preserves remote links when necessary.
 
 ## Export structure
