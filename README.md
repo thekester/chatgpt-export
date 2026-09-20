@@ -63,8 +63,8 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Option | Effect |
 | --- | --- |
 | Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation. |
-| Save images | Downloads images when accessible. |
-| Save attachments | Preserves documents and generated files. |
+| Save images in a separate directory | Downloads images into an `images/` directory inside the export archive and keeps Markdown links to them. |
+| Save attachments and generated files in a separate directory | Preserves documents and generated files in a `files/` directory inside the export archive and keeps Markdown links to them. |
 | Markdown images and files | Choose **Keep images and files as links** or **Embed images and files (Base64)**. Normal web links and source citations remain links. Embedding creates an `.embedded.md` file and makes it much larger. |
 | Include thinking summaries | Off by default. When enabled, visible ChatGPT thinking summaries are grouped into one `Thinking` section with a total duration. Hidden chain-of-thought is never exported. |
 | Raw JSON data | Adds the source conversation JSON. |
