@@ -28,10 +28,12 @@ def build(name, adapt):
     manifest = adapt(json.loads(json.dumps(base)))
     (out / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     zpath = DIST / f"chatgpt-export-{name}-{base['version']}.zip"
+    archive_root = zpath.stem
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
         for f in sorted(out.rglob("*")):
             if f.is_file():
-                z.write(f, f.relative_to(out).as_posix())
+                relative = f.relative_to(out).as_posix()
+                z.write(f, f"{archive_root}/{relative}")
     print("OK", zpath.name)
 
 shutil.rmtree(DIST, ignore_errors=True)
