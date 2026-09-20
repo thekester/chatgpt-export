@@ -526,7 +526,13 @@
     const lines = [`# ${conv.title || "Untitled"}`, ""];
     turns.forEach((t, index) => {
       if (index) lines.push("---", "");
-      lines.push(`> **${ROLE_LABELS[t.role]}**`, "", t.md.join("\n\n"), "");
+      const content = t.md.join("\n\n");
+      if (t.role === "user" && !/[\r\n]/.test(content.trim())) {
+        const question = content.trim().replace(/\|/g, "\\|");
+        lines.push("| **User question** |", "| :--- |", `| ${question} |`, "");
+      } else {
+        lines.push(`> **${ROLE_LABELS[t.role]}**`, "", content, "");
+      }
     });
     return lines.join("\n").trimEnd() + "\n";
   }
