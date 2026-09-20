@@ -410,6 +410,7 @@
     if (!note) throw new Error('Modern Joplin note is missing.');
     const noteId = jexId();
     const resources = [];
+    const now = new Date().toISOString();
     let body = stripFrontMatter(note.content);
     for (const file of files) {
       if (!/^(?:images|files)\//.test(file.name)) continue;
@@ -419,6 +420,25 @@
       const resourceName = `${resourceId}.${ext}`;
       const candidates = [`../${file.name}`, `./${file.name}`, file.name];
       for (const candidate of candidates) body = body.split(candidate).join(`:/` + resourceId);
+      const mime = file.mime || 'application/octet-stream';
+      const size = typeof file.content === 'string'
+        ? new TextEncoder().encode(file.content).byteLength
+        : file.content.byteLength;
+      const resourceMetadata = [
+        `title: ${base}`,
+        `id: ${resourceId}`,
+        `mime: ${mime}`,
+        `file_extension: ${ext}`,
+        `size: ${size}`,
+        `created_time: ${now}`,
+        `updated_time: ${now}`,
+        'is_shared: 0',
+        'share_id:',
+        'encryption_cipher_text:',
+        'encryption_applied: 0',
+        'type_: 4'
+      ].join('\n');
+      resources.push({name:`${resourceId}.md`,content:resourceMetadata});
       resources.push({name:`resources/${resourceName}`,content:file.content});
     }
     const title = conversation.title || 'Untitled';
@@ -455,8 +475,7 @@
       'is_shared: 0',
       'share_id:',
       'conflict_original_id:',
-      'type_: 1',
-      ''
+      'type_: 1'
     ].join('\n');
     return CGX_buildTar([{name:`${noteId}.md`,content:serialized}, ...resources]);
   }
