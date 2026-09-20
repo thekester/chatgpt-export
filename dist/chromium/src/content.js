@@ -210,8 +210,19 @@
     for(const {rel,uri} of entries){
       for(const candidate of [`../${rel}`,`./${rel}`,rel]) out=out.split(candidate).join(uri);
     }
-    const banner='> Self-contained export: resources embedded as Data URIs (`data:<MIME type>;base64,...`).\n\n';
-    return banner+out;
+    const header = [
+      '---',
+      'source: ChatGPT',
+      'format: self-contained-markdown',
+      'resources: embedded',
+      '---',
+      '',
+      '> **Self-contained Markdown**',
+      '>',
+      '> Images and files are embedded directly in this document as MIME/Base64 Data URIs.',
+      '',
+    ].join('\n');
+    return header+out;
   }
 
   async function collectImages(ctx, convId, enabled, prefix, accountId) {
