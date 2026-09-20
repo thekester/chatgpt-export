@@ -242,7 +242,7 @@
       '---',
       '',
     ].join('\n');
-    const body = out.replace(/^# [^\r\n]*(?:\r?\n){1,2}/, '');
+    const body = modernizeJoplinTables(out.replace(/^# [^\r\n]*(?:\r?\n){1,2}/, ''));
     return header+body;
   }
 
@@ -399,6 +399,53 @@
 
   function stripFrontMatter(text) {
     return String(text || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trimStart();
+  }
+
+  function jexEscapeHtml(value) {
+    return String(value || '').replace(/[&<>"']/g, (ch) => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+  }
+
+  function jexTableCell(value) {
+    let s = String(value || '').trim();
+    const tokens = [];
+    const token = (html) => { const id = `\u0000CGXT${tokens.length}\u0000`; tokens.push(html); return id; };
+    s = s.replace(/!\[([^\]]*)\]\((:\/[a-f0-9]{32}|https?:\/\/[^\s)]+)\)/gi, (_m, alt, url) => token(`<img src="${url}" alt="${jexEscapeHtml(alt)}" loading="lazy">`));
+    s = s.replace(/\[([^\]]+)\]\((:\/[a-f0-9]{32}|https?:\/\/[^\s)]+)\)/gi, (_m, label, url) => token(`<a href="${url}">${jexEscapeHtml(label)}</a>`));
+    s = jexEscapeHtml(s).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/__(.+?)__/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*([^*]+)\*/g, '<em>$1</em>').replace(/_([^_]+)_/g, '<em>$1</em>').replace(/\n/g, '<br>');
+    return s.replace(/\u0000CGXT(\d+)\u0000/g, (_m, i) => tokens[Number(i)]);
+  }
+
+  function jexSplitTableRow(line) {
+    const source = String(line || '').trim().replace(/^\|/, '').replace(/\|$/, '');
+    const cells = []; let current = ''; let escaped = false;
+    for (const ch of source) {
+      if (escaped) { current += ch; escaped = false; continue; }
+      if (ch === '\\') { current += ch; escaped = true; continue; }
+      if (ch === '|') { cells.push(current.trim()); current = ''; } else current += ch;
+    }
+    cells.push(current.trim());
+    return cells;
+  }
+
+  function modernizeJoplinTables(markdown) {
+    const lines = String(markdown || '').split('\n');
+    const output = [];
+    for (let i = 0; i < lines.length;) {
+      if (!/^\s*\|/.test(lines[i]) || !/^\s*\|(?:\s*:?-{3,}:?\s*\|)+\s*$/.test(lines[i + 1] || '')) { output.push(lines[i++]); continue; }
+      const headers = jexSplitTableRow(lines[i]);
+      const separators = jexSplitTableRow(lines[i + 1]);
+      const rows = []; i += 2;
+      while (i < lines.length && /^\s*\|/.test(lines[i]) && lines[i].trim().endsWith('|')) rows.push(jexSplitTableRow(lines[i++]));
+      const colCount = Math.max(headers.length, ...rows.map((row) => row.length));
+      const alignFor = (index) => { const rule = separators[index] || ''; return /^:-+:$/.test(rule) ? 'center' : /^-+:$/.test(rule) ? 'right' : /^:-+$/.test(rule) ? 'left' : ''; };
+      const cell = (value, tag, align) => `<${tag}${align ? ` style="text-align:${align}"` : ''}>${jexTableCell(value)}</${tag}>`;
+      const table = ['<table style="width:100%;table-layout:fixed;border-collapse:collapse;overflow-wrap:anywhere;word-break:break-word">', '<thead><tr>'];
+      for (let c = 0; c < colCount; c++) table.push(cell(headers[c] || '', 'th', alignFor(c)));
+      table.push('</tr></thead><tbody>');
+      for (const row of rows) { table.push('<tr>'); for (let c = 0; c < colCount; c++) table.push(cell(row[c] || '', 'td', alignFor(c))); table.push('</tr>'); }
+      table.push('</tbody></table>'); output.push(table.join(''));
+    }
+    return output.join('\n');
   }
 
   function buildJex(conversation, files) {
