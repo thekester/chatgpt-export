@@ -424,6 +424,13 @@
       const conv=conversationFromDom(target.id);
       r=await exportConversation(conv.conversation_id,opts,'',{accountId,shared:target.type==='share',shareId:target.type==='share'?target.id:null},conv);
     }
+    const embeddedOnly = opts.embeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
+    if (embeddedOnly) {
+      const embedded = r.files.find(f => /\.embedded\.md$/i.test(f.name));
+      if (!embedded) throw new Error('Self-contained Markdown could not be generated.');
+      download(`${r.base}.embedded.md`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
+      return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
+    }
     r.files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(r.files,{schema_version:4,exported_at:new Date().toISOString(),conversation_count:1,embedded_markdown:!!opts.embeddedMd,capabilities:capabilitySnapshot()},opts.checksums);
     download(`${r.base}.zip`,CGX_buildZip(r.files));
@@ -569,6 +576,7 @@
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.'});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,embeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
+    if(opts.embeddedMd&&!opts.md) opts.md=true;
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.'});return false;}
     busy=true;const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
     job.then(r=>sendResponse({ok:true,...r})).catch(e=>sendResponse({ok:false,error:e.message})).finally(()=>{busy=false;});return true;

@@ -47,7 +47,7 @@ function currentOptions() {
   const f = selectedFormat();
   const embeddedMd = optEmbedded.checked;
   return {
-    format: f, md: f !== "html", html: f !== "md", images: optImages.checked || embeddedMd, files: optFiles.checked || embeddedMd, json: optJson.checked,
+    format: f, md: f !== "html", html: f !== "md", images: optImages.checked, files: optFiles.checked, json: optJson.checked,
     embeddedMd, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
@@ -159,7 +159,6 @@ api.runtime.onMessage.addListener((msg) => {
 
 [...formatInputs, optImages, optFiles, optJson, optEmbedded, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 optEmbedded.addEventListener("change", () => {
-  if (optEmbedded.checked) { optImages.checked = true; optFiles.checked = true; }
   saveOptions();
 });
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));

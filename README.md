@@ -68,6 +68,8 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Incremental export | Skips unchanged conversations from previous exports. |
 | SHA-256 checksums | Adds file hashes to the manifest. |
 
+When **Self-contained Markdown** is the only save option, the current conversation is downloaded directly as a single `.embedded.md` file, without a ZIP archive. A ZIP is created when another output or save option is enabled. **Save images** and **Save attachments and generated files** remain independent options and create their own `images/` and `files/` directories inside the archive.
+
 Access to all websites is optional. It is requested only when the extension needs to retrieve images or files hosted outside ChatGPT. Without this permission, the main export still works and preserves remote links when necessary.
 
 ## Export structure
