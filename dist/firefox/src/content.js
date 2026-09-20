@@ -238,12 +238,8 @@
       'tags:',
       '  - chatgpt',
       '  - export',
-      '  - self-contained',
+      '  - joplin',
       '---',
-      '',
-      '> **ChatGPT export**',
-      '>',
-      '> This note is formatted for Joplin. Images and files are kept as local resources next to the note.',
       '',
     ].join('\n');
     const body = out.replace(/^# [^\r\n]*(?:\r?\n){1,2}/, '');
