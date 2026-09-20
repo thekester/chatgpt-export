@@ -98,11 +98,11 @@
     <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
     <p id="jex-note" class="jex-note" hidden>JEX automatically includes the note, images, attachments, and generated files. Joplin places the imported note in a notebook, usually <em>Imported</em>, because every Joplin note must belong to a notebook. The note follows Joplin’s active light or dark theme.</p>
   </fieldset>
-  <fieldset class="media-mode jex-hidden" aria-label="Markdown media mode">
-    <legend>Markdown media</legend>
-    <label><input type="radio" name="media-mode" value="links" checked> Keep media as links</label>
-    <label><input type="radio" name="media-mode" value="embedded"> Embed media in Markdown (Base64)</label>
-    <button class="info" type="button" data-help="Keep media as links leaves remote URLs or saved relative files. Embed media in Markdown (Base64) copies images and files into the Markdown itself and makes the file much larger." aria-label="What is Markdown media mode?">i</button>
+  <fieldset class="media-mode jex-hidden" aria-label="Markdown image and file mode">
+    <legend>Markdown images and files</legend>
+    <label><input type="radio" name="media-mode" value="links" checked> Keep images and files as links</label>
+    <label><input type="radio" name="media-mode" value="embedded"> Embed images and files (Base64)</label>
+    <button class="info" type="button" data-help="Keep images and files as links leaves remote URLs or saved relative files. Embed images and files (Base64) copies binary media into the Markdown itself. Normal web links, source citations, and text are never converted to Base64." aria-label="What is the image and file mode?">i</button>
   </fieldset>
   <button id="grant" type="button" hidden title="Optional permission to download media hosted outside ChatGPT">Allow external media</button>
   <p class="permission-hint">External media permission only allows downloading images or files hosted outside ChatGPT. It does not choose between links and Base64 embedding.</p>
