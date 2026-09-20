@@ -395,6 +395,71 @@
   function download(filename,blob){
     const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
   }
+
+  function jexId() {
+    const raw = globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
+    return raw.replace(/[^a-f0-9]/gi, '').padEnd(32, '0').slice(0, 32).toLowerCase();
+  }
+
+  function stripFrontMatter(text) {
+    return String(text || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trimStart();
+  }
+
+  function buildJex(conversation, files) {
+    const note = files.find(f => /\.modern\.joplin\.md$/i.test(f.name));
+    if (!note) throw new Error('Modern Joplin note is missing.');
+    const noteId = jexId();
+    const resources = [];
+    let body = stripFrontMatter(note.content);
+    for (const file of files) {
+      if (!/^(?:images|files)\//.test(file.name)) continue;
+      const resourceId = jexId();
+      const base = file.name.split('/').pop() || 'resource.bin';
+      const ext = (base.match(/\.([a-z0-9]{1,12})$/i) || [,'bin'])[1].toLowerCase();
+      const resourceName = `${resourceId}.${ext}`;
+      const candidates = [`../${file.name}`, `./${file.name}`, file.name];
+      for (const candidate of candidates) body = body.split(candidate).join(`:/` + resourceId);
+      resources.push({name:`resources/${resourceName}`,content:file.content});
+    }
+    const title = conversation.title || 'Untitled';
+    const created = joplinDate(conversation.create_time) || new Date().toISOString();
+    const updated = joplinDate(conversation.update_time) || created;
+    const sourceUrl = `https://chatgpt.com/c/${encodeURIComponent(conversation.conversation_id || conversation.id || '')}`;
+    const serialized = [
+      title,
+      '',
+      body,
+      '',
+      `id: ${noteId}`,
+      'parent_id:',
+      `created_time: ${created}`,
+      `updated_time: ${updated}`,
+      'is_conflict: 0',
+      'latitude: 0',
+      'longitude: 0',
+      'altitude: 0',
+      'author: ChatGPT',
+      `source_url: ${sourceUrl}`,
+      'is_todo: 0',
+      'todo_due: 0',
+      'todo_completed: 0',
+      'source: chatgpt',
+      'source_application: chatgpt-markdown-export',
+      'application_data:',
+      'order: 0',
+      `user_created_time: ${created}`,
+      `user_updated_time: ${updated}`,
+      'encryption_cipher_text:',
+      'encryption_applied: 0',
+      'markup_language: 1',
+      'is_shared: 0',
+      'share_id:',
+      'conflict_original_id:',
+      'type_: 1',
+      ''
+    ].join('\n');
+    return CGX_buildTar([{name:`${noteId}.md`,content:serialized}, ...resources]);
+  }
   function progress(done,total){try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',done,total})).catch(()=>{});}catch(_){} }
 
   function currentTarget(){
@@ -467,6 +532,10 @@
       const suffix = opts.modernEmbeddedMd ? '.modern.joplin.md' : '.embedded.md';
       download(`${r.base}${suffix}`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
+    }
+    if (opts.modernEmbeddedMd) {
+      download(`${r.base}.jex`, buildJex(r.conv, r.files));
+      return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,joplin:true};
     }
     r.files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(r.files,{schema_version:4,exported_at:new Date().toISOString(),conversation_count:1,embedded_markdown:!!opts.embeddedMd,capabilities:capabilitySnapshot()},opts.checksums);

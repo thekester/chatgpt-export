@@ -147,5 +147,51 @@
     return new Blob([...chunks, ...central, ...trailer], { type: "application/zip" });
   }
 
+  function tarBytes(content, enc) {
+    if (typeof content === "string") return enc.encode(content);
+    if (content instanceof Uint8Array) return content;
+    if (content instanceof ArrayBuffer) return new Uint8Array(content);
+    if (ArrayBuffer.isView(content)) return new Uint8Array(content.buffer, content.byteOffset, content.byteLength);
+    throw new TypeError("Unsupported TAR content");
+  }
+
+  function tarField(value, length, enc, numeric = false) {
+    const text = numeric ? `${Number(value).toString(8).padStart(length - 1, "0")}\0` : String(value || "");
+    const bytes = enc.encode(text).subarray(0, length);
+    const out = new Uint8Array(length);
+    out.set(bytes);
+    return out;
+  }
+
+  function buildTar(files) {
+    const enc = new TextEncoder();
+    const chunks = [];
+    for (const file of files) {
+      const data = tarBytes(file.content, enc);
+      const name = enc.encode(file.name);
+      if (name.length > 100) throw new Error(`TAR filename is too long: ${file.name}`);
+      const header = new Uint8Array(512);
+      header.set(tarField(file.name, 100, enc), 0);
+      header.set(tarField(0o644, 8, enc, true), 100);
+      header.set(tarField(0, 8, enc, true), 108);
+      header.set(tarField(0, 8, enc, true), 116);
+      header.set(tarField(data.byteLength, 12, enc, true), 124);
+      header.set(tarField(Math.floor(Date.now() / 1000), 12, enc, true), 136);
+      header.fill(0x20, 148, 156);
+      header[156] = 0x30;
+      header.set(tarField("ustar", 6, enc), 257);
+      header.set(tarField("00", 2, enc), 263);
+      let checksum = 0;
+      for (const byte of header) checksum += byte;
+      header.set(tarField(`${checksum}\0 `, 8, enc), 148);
+      chunks.push(header, data);
+      const padding = (512 - (data.byteLength % 512)) % 512;
+      if (padding) chunks.push(new Uint8Array(padding));
+    }
+    chunks.push(new Uint8Array(1024));
+    return new Blob(chunks, { type: "application/x-tar" });
+  }
+
   globalThis.CGX_buildZip = buildZip;
+  globalThis.CGX_buildTar = buildTar;
 })();

@@ -148,7 +148,7 @@ async function run(type) {
   try {
     const r = await send({ type, options: currentOptions() });
     if (!r.ok) throw new Error(r.error);
-    let text = r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported.";
+    let text = r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported.");
     if (r.failed) text += ` ${r.failed} failed; see _errors.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
