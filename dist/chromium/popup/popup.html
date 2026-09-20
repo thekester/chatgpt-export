@@ -60,6 +60,8 @@
     .formats input { position: absolute; opacity: 0; pointer-events: none; }
     .formats label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
     .formats label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+    .media-mode { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; gap: 8px; }
+    .media-mode legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
     label { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
     input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
     .number-row { justify-content: space-between; }
@@ -89,7 +91,6 @@
     <label class="option jex-hidden"><input type="checkbox" id="opt-images"><span>Save images</span><button class="info" type="button" data-help="Downloads image assets into an images/ directory. It is independent from self-contained Markdown." aria-label="What does Save images do?">i</button></label>
     <label class="option jex-hidden"><input type="checkbox" id="opt-json"><span>Include raw data (JSON)</span><button class="info" type="button" data-help="Adds the original conversation JSON to the export. Useful for backups and future re-rendering." aria-label="What does Include raw data do?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-thinking"><span>Include thinking summaries</span><button class="info" type="button" data-help="Keeps visible reasoning summaries exposed by ChatGPT. They are grouped into one Thinking section with a total duration. Hidden chain-of-thought is never exported." aria-label="What are thinking summaries?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-embedded-md"><span>Standard self-contained Markdown</span><button class="info" type="button" data-help="Creates a plain .embedded.md file with images and files embedded as MIME/Base64 Data URIs." aria-label="What is standard self-contained Markdown?">i</button></label>
     <label class="option jex-hidden"><input type="checkbox" id="opt-files"><span>Save attachments and generated files</span><button class="info" type="button" data-help="Downloads attachments and sandbox-generated files into a files/ directory. It is independent from self-contained Markdown." aria-label="What does Save attachments do?">i</button></label>
     <label class="option jex-hidden"><input type="checkbox" id="opt-branches"><span>Export all branches/regenerations</span><button class="info" type="button" data-help="Includes alternative response branches and regenerations when ChatGPT exposes them." aria-label="What does Export all branches do?">i</button></label>
     <label class="option jex-hidden"><input type="checkbox" id="opt-incremental"><span>Incremental history export</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>
@@ -97,8 +98,14 @@
     <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
     <p id="jex-note" class="jex-note" hidden>JEX automatically includes the note, images, attachments, and generated files. Joplin places the imported note in a notebook, usually <em>Imported</em>, because every Joplin note must belong to a notebook. The note follows Joplin’s active light or dark theme.</p>
   </fieldset>
+  <fieldset class="media-mode jex-hidden" aria-label="Markdown media mode">
+    <legend>Markdown media</legend>
+    <label><input type="radio" name="media-mode" value="links" checked> Keep media as links</label>
+    <label><input type="radio" name="media-mode" value="embedded"> Embed media in Markdown (Base64)</label>
+    <button class="info" type="button" data-help="Keep media as links leaves remote URLs or saved relative files. Embed media in Markdown (Base64) copies images and files into the Markdown itself and makes the file much larger." aria-label="What is Markdown media mode?">i</button>
+  </fieldset>
   <button id="grant" type="button" hidden title="Optional permission to download media hosted outside ChatGPT">Allow external media</button>
-  <p class="permission-hint">External media permission is only needed for images or files hosted outside ChatGPT, such as web-search and product images.</p>
+  <p class="permission-hint">External media permission only allows downloading images or files hosted outside ChatGPT. It does not choose between links and Base64 embedding.</p>
   <p id="help" role="status" hidden></p>
   <button id="current" type="button">Export this conversation</button>
   <button id="all" type="button">Export all history (.zip)</button>

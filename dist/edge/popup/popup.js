@@ -9,13 +9,13 @@ const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
 const optThinking = $("opt-thinking");
-const optEmbedded = $("opt-embedded-md");
 const optFiles = $("opt-files");
 const optBranches = $("opt-branches");
 const optIncremental = $("opt-incremental");
 const optChecksums = $("opt-checksums");
 const optPartSize = $("opt-part-size");
 const formatInputs = [...document.querySelectorAll('input[name="format"]')];
+const mediaModeInputs = [...document.querySelectorAll('input[name="media-mode"]')];
 const ALL_SITES = { origins: ["<all_urls>"] };
 
 let tabId = null;
@@ -33,7 +33,8 @@ function loadOptions() {
   optImages.checked = saved.images ?? true;
   optJson.checked = saved.json ?? false;
   optThinking.checked = saved.thinking ?? false;
-  optEmbedded.checked = saved.embeddedMd ?? false;
+  const mediaMode = saved.embeddedMd ? "embedded" : "links";
+  mediaModeInputs.forEach((el) => (el.checked = el.value === mediaMode));
   if (saved.modernEmbeddedMd) {
     const jex = formatInputs.find((el) => el.value === "jex");
     if (jex) jex.checked = true;
@@ -53,8 +54,7 @@ function selectedFormat() {
 function currentOptions() {
   const f = selectedFormat();
   const jex = f === "jex";
-  if (jex) optEmbedded.checked = false;
-  const embeddedMd = optEmbedded.checked || jex;
+  const embeddedMd = !jex && mediaModeInputs.find((el) => el.checked)?.value === "embedded";
   return {
     format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked, thinking: optThinking.checked,
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
@@ -66,7 +66,6 @@ function updateFormatUI() {
   const jex = selectedFormat() === "jex";
   document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
   $("jex-note").hidden = !jex;
-  if (jex) optEmbedded.checked = false;
   refreshButtons();
   checkPermission();
 }
@@ -100,7 +99,8 @@ function setBusy(b) {
 
 // Images outside chatgpt.com (web search, products) require access to all sites.
 async function checkPermission() {
-  if ((!optImages.checked && !optFiles.checked && !optEmbedded.checked && selectedFormat() !== "jex") || !api.permissions) {
+  const embedded = mediaModeInputs.find((el) => el.checked)?.value === "embedded";
+  if ((!optImages.checked && !optFiles.checked && !embedded && selectedFormat() !== "jex") || !api.permissions) {
     btnGrant.hidden = true;
     return;
   }
@@ -197,10 +197,7 @@ api.runtime.onMessage.addListener((msg) => {
   setStatus(`Conversation ${Math.min(msg.done + 1, msg.total)} of ${msg.total}…`);
 });
 
-[...formatInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
-optEmbedded.addEventListener("change", () => {
-  saveOptions();
-});
+[...formatInputs, ...mediaModeInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
 loadOptions();

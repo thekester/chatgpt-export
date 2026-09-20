@@ -64,14 +64,14 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation. |
 | Save images | Downloads images when accessible. |
 | Save attachments | Preserves documents and generated files. |
-| Standard self-contained Markdown | Adds an `.embedded.md` file with resources encoded as Base64. |
+| Markdown media | Choose **Keep media as links** or **Embed media in Markdown (Base64)**. Embedding creates an `.embedded.md` file and makes it much larger. |
 | Include thinking summaries | Off by default. When enabled, visible ChatGPT thinking summaries are grouped into one `Thinking` section with a total duration. Hidden chain-of-thought is never exported. |
 | Raw JSON data | Adds the source conversation JSON. |
 | All branches | Includes available regenerations and branches. |
 | Incremental export | Skips unchanged conversations from previous exports. |
 | SHA-256 checksums | Adds file hashes to the manifest. |
 
-When **Self-contained Markdown** is the only save option, the current conversation is downloaded directly as a single `.embedded.md` file, without a ZIP archive. A ZIP is created when another output or save option is enabled. **Save images** and **Save attachments and generated files** remain independent options and create their own `images/` and `files/` directories inside the archive.
+When **Embed media in Markdown (Base64)** is selected as the only save option, the current conversation is downloaded directly as a single `.embedded.md` file, without a ZIP archive. A ZIP is created when another output or save option is enabled. **Keep media as links** leaves remote links unchanged, while **Save images** and **Save attachments and generated files** download local copies and link to them from the Markdown. **Allow external media** only grants permission to download remote resources; it does not enable Base64 embedding.
 
 The standard self-contained format keeps the export as plain Markdown with embedded Base64 resources. The **JEX** format creates a native `.jex` archive with the metadata fields supported by Joplin, including title, creation/update dates, source, author, and tags. Images and files are stored as Joplin resources referenced from the note, instead of putting large Data URIs in the note. The note uses theme-neutral Markdown and follows Joplin’s active light or dark theme.
 
