@@ -335,8 +335,10 @@
     if(opts.html) docs.push({name:`${prefix}${mainName}.html`,content:fill(CGX.toHtml(conv,currentTurns),allMap)});
     for (const b of branchData) {
       const stem=`branches/branch-${String(b.n).padStart(3,'0')}-${String(b.nodeId).slice(0,8)}`;
-      if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:fill(CGX.toMarkdown({...conv,title:`${conv.title||'Sans titre'} — branche ${b.n}`},b.turns),allMap)});
-      if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Sans titre'} — branche ${b.n}`},b.turns),allMap)});
+     if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:fill(CGX.toMarkdown({...conv,title:`${conv.title||'Sans titre'} — branche ${b.n}`},b.turns),allMap)});
+     if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Sans titre'} — branche ${b.n}`},b.turns),allMap)});
+      if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:fill(CGX.toMarkdown({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns),allMap)});
+      if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns),allMap)});
     }
     const localized=await localizeEmbeddedImages(docs,prefix,opts.images||opts.embeddedMd,accountId); docs=localized.documents;
     const assetFiles=[...imgs.files,...atts.files,...localized.files];
