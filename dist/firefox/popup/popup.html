@@ -54,7 +54,7 @@
     #status { min-height: 1.45em; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
     #status.error { color: var(--error); }
     fieldset { border: 0; padding: 0; margin: 0 0 14px; display: grid; gap: 6px; }
-    .formats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+    .formats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
     .formats label { justify-content: center; padding: 7px 4px; gap: 0; border-left: 1px solid var(--line); }
     .formats label:first-child { border-left: 0; }
     .formats input { position: absolute; opacity: 0; pointer-events: none; }
@@ -82,12 +82,12 @@
     <label><input type="radio" name="format" value="md"> Markdown</label>
     <label><input type="radio" name="format" value="html"> HTML</label>
     <label><input type="radio" name="format" value="both"> Both</label>
+    <label><input type="radio" name="format" value="jex"> JEX</label>
   </fieldset>
   <fieldset>
     <label class="option"><input type="checkbox" id="opt-images"><span>Save images</span><button class="info" type="button" data-help="Downloads image assets into an images/ directory. It is independent from self-contained Markdown." aria-label="What does Save images do?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-json"><span>Include raw data (JSON)</span><button class="info" type="button" data-help="Adds the original conversation JSON to the export. Useful for backups and future re-rendering." aria-label="What does Include raw data do?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-embedded-md"><span>Standard self-contained Markdown</span><button class="info" type="button" data-help="Creates a plain .embedded.md file with images and files embedded as MIME/Base64 Data URIs." aria-label="What is standard self-contained Markdown?">i</button></label>
-    <label class="option"><input type="checkbox" id="opt-modern-embedded-md"><span>Export to Joplin (JEX)</span><button class="info" type="button" data-help="Creates a native .jex file containing the note and all resources. Import it directly in Joplin with File > Import > JEX." aria-label="What is Export to Joplin JEX?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-files"><span>Save attachments and generated files</span><button class="info" type="button" data-help="Downloads attachments and sandbox-generated files into a files/ directory. It is independent from self-contained Markdown." aria-label="What does Save attachments do?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-branches"><span>Export all branches/regenerations</span><button class="info" type="button" data-help="Includes alternative response branches and regenerations when ChatGPT exposes them." aria-label="What does Export all branches do?">i</button></label>
     <label class="option"><input type="checkbox" id="opt-incremental"><span>Incremental history export</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>

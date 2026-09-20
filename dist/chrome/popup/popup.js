@@ -9,7 +9,6 @@ const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
 const optEmbedded = $("opt-embedded-md");
-const optModernEmbedded = $("opt-modern-embedded-md");
 const optFiles = $("opt-files");
 const optBranches = $("opt-branches");
 const optIncremental = $("opt-incremental");
@@ -28,13 +27,15 @@ function loadOptions() {
   try {
     saved = JSON.parse(localStorage.getItem("cgx-options") || "{}");
   } catch (_) {}
-  const format = ["md", "html", "both"].includes(saved.format) ? saved.format : "both";
+  const format = ["md", "html", "both", "jex"].includes(saved.format) ? saved.format : "both";
   formatInputs.forEach((el) => (el.checked = el.value === format));
   optImages.checked = saved.images ?? true;
   optJson.checked = saved.json ?? false;
   optEmbedded.checked = saved.embeddedMd ?? false;
-  optModernEmbedded.checked = saved.modernEmbeddedMd ?? false;
-  if (optModernEmbedded.checked) optEmbedded.checked = false;
+  if (saved.modernEmbeddedMd) {
+    const jex = formatInputs.find((el) => el.value === "jex");
+    if (jex) jex.checked = true;
+  }
   optFiles.checked = saved.files ?? true;
   optBranches.checked = saved.branches ?? false;
   optIncremental.checked = saved.incremental ?? false;
@@ -49,10 +50,11 @@ function selectedFormat() {
 
 function currentOptions() {
   const f = selectedFormat();
-  const embeddedMd = optEmbedded.checked || optModernEmbedded.checked;
+  const jex = f === "jex";
+  const embeddedMd = optEmbedded.checked || jex;
   return {
-    format: f, md: f !== "html", html: f !== "md", images: optImages.checked, files: optFiles.checked, json: optJson.checked,
-    embeddedMd, modernEmbeddedMd: optModernEmbedded.checked, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
+    format: f, md: jex || f !== "html", html: !jex && f !== "md", images: optImages.checked, files: optFiles.checked, json: optJson.checked,
+    embeddedMd, modernEmbeddedMd: jex, branches: optBranches.checked, incremental: optIncremental.checked, checksums: optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
   };
 }
@@ -75,7 +77,7 @@ function setStatus(text, isError = false) {
 let busy = false;
 function refreshButtons() {
   btnCurrent.disabled = busy || !tabId || !hasConversation;
-  btnAll.disabled = busy || !tabId;
+  btnAll.disabled = busy || !tabId || selectedFormat() === "jex";
 }
 
 function setBusy(b) {
@@ -85,7 +87,7 @@ function setBusy(b) {
 
 // Images outside chatgpt.com (web search, products) require access to all sites.
 async function checkPermission() {
-  if ((!optImages.checked && !optFiles.checked && !optEmbedded.checked && !optModernEmbedded.checked) || !api.permissions) {
+  if ((!optImages.checked && !optFiles.checked && !optEmbedded.checked && selectedFormat() !== "jex") || !api.permissions) {
     btnGrant.hidden = true;
     return;
   }
@@ -152,7 +154,7 @@ async function run(type) {
     if (r.failed) text += ` ${r.failed} failed; see _errors.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
-    if (currentOptions().embeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
+    if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
     setStatus(text, !!(r.failed || r.imageFailures));
   } catch (e) {
     setStatus(e.message || "Export failed.", true);
@@ -172,11 +174,6 @@ api.runtime.onMessage.addListener((msg) => {
 
 [...formatInputs, optImages, optFiles, optJson, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 optEmbedded.addEventListener("change", () => {
-  if (optEmbedded.checked) optModernEmbedded.checked = false;
-  saveOptions();
-});
-optModernEmbedded.addEventListener("change", () => {
-  if (optModernEmbedded.checked) optEmbedded.checked = false;
   saveOptions();
 });
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));

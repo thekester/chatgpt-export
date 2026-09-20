@@ -682,6 +682,7 @@
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.'});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
+    opts.modernEmbeddedMd = opts.format === 'jex' || !!opts.modernEmbeddedMd;
     opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.'});return false;}
