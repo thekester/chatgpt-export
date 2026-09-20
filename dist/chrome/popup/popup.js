@@ -105,7 +105,13 @@ async function checkPermission() {
     return;
   }
   try {
-    btnGrant.hidden = await api.permissions.contains(ALL_SITES);
+    const granted = await api.permissions.contains(ALL_SITES);
+    btnGrant.hidden = false;
+    btnGrant.textContent = granted ? "Disable external media" : "Allow external media";
+    btnGrant.title = granted
+      ? "Remove permission to download media hosted outside ChatGPT"
+      : "Optional permission to download media hosted outside ChatGPT";
+    btnGrant.setAttribute("aria-pressed", String(granted));
   } catch (_) {
     btnGrant.hidden = true;
   }
@@ -113,8 +119,14 @@ async function checkPermission() {
 
 btnGrant.addEventListener("click", async () => {
   try {
-    const ok = await api.permissions.request(ALL_SITES);
-    setStatus(ok ? "Access granted." : "Without this access, only generated images will be saved.", !ok);
+    const granted = await api.permissions.contains(ALL_SITES);
+    if (granted) {
+      const removed = await api.permissions.remove(ALL_SITES);
+      setStatus(removed ? "External media permission disabled." : "Permission could not be disabled.", !removed);
+    } else {
+      const ok = await api.permissions.request(ALL_SITES);
+      setStatus(ok ? "Access granted." : "Without this access, only generated images will be saved.", !ok);
+    }
   } catch (e) {
     setStatus(e.message, true);
   }
