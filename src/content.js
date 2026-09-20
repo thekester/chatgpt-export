@@ -548,6 +548,13 @@
       download(`${r.base}${suffix}`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
     }
+    const markdownOnly = opts.md && !opts.html && !opts.embeddedMd && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
+    if (markdownOnly) {
+      const markdown = r.files.find(f => f.name === `${r.base}.md`);
+      if (!markdown) throw new Error('Markdown could not be generated.');
+      download(`${r.base}.md`, new Blob([markdown.content], {type:'text/markdown;charset=utf-8'}));
+      return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,markdownOnly:true};
+    }
     if (opts.modernEmbeddedMd) {
       download(`${r.base}.jex`, buildJex(r.conv, r.files));
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,joplin:true};
