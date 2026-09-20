@@ -195,7 +195,17 @@
     return `data:${mimeFor(file.mime,'',file.name)};base64,${bytesToBase64(bytes)}`;
   }
 
-  function embedAssetsInMarkdown(markdown, assetFiles, prefix='') {
+  function yamlValue(value) {
+    return JSON.stringify(String(value ?? '').replace(/\r?\n/g, ' ').trim());
+  }
+
+  function joplinDate(value) {
+    if (value == null || value === '') return null;
+    const date = typeof value === 'number' ? new Date(value * 1000) : new Date(value);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  }
+
+  function embedAssetsInMarkdown(markdown, assetFiles, prefix='', modern=false, conv=null, source={}) {
     let out=String(markdown||'');
     // Les documents de branche peuvent utiliser ../images/... alors que le document principal
     // utilise images/.... On remplace les deux formes, ainsi que ./... .
@@ -210,19 +220,32 @@
     for(const {rel,uri} of entries){
       for(const candidate of [`../${rel}`,`./${rel}`,rel]) out=out.split(candidate).join(uri);
     }
+    if (!modern) return out;
+    const title = conv && conv.title ? conv.title : 'Untitled';
+    const created = joplinDate(conv && conv.create_time);
+    const updated = joplinDate(conv && conv.update_time);
+    const conversationId = conv && (conv.conversation_id || conv.id);
+    const sourceUrl = conversationId ? `https://chatgpt.com/c/${encodeURIComponent(conversationId)}` : '';
     const header = [
       '---',
-      'source: ChatGPT',
-      'format: self-contained-markdown',
-      'resources: embedded',
+      `title: ${yamlValue(title)}`,
+      ...(created ? [`created: ${created}`] : []),
+      ...(updated ? [`updated: ${updated}`] : []),
+      ...(sourceUrl ? [`source: ${yamlValue(sourceUrl)}`] : []),
+      'author: "ChatGPT"',
+      'tags:',
+      '  - chatgpt',
+      '  - export',
+      '  - self-contained',
       '---',
       '',
-      '> **Self-contained Markdown**',
+      '> **ChatGPT export**',
       '>',
-      '> Images and files are embedded directly in this document as MIME/Base64 Data URIs.',
+      '> This note is formatted for Joplin. Images and files are embedded directly as MIME/Base64 Data URIs.',
       '',
     ].join('\n');
-    return header+out;
+    const body = out.replace(/^# [^\r\n]*(?:\r?\n){1,2}/, '');
+    return header+body;
   }
 
   async function collectImages(ctx, convId, enabled, prefix, accountId) {
@@ -355,8 +378,8 @@
       const embedded=[];
       for(const d of docs){
         if(!/\.md$/i.test(d.name) || typeof d.content!=='string') continue;
-        const name=d.name.replace(/\.md$/i,opts.modernEmbeddedMd?'.modern.embedded.md':'.embedded.md');
-        embedded.push({name,content:embedAssetsInMarkdown(d.content,assetFiles,prefix,!!opts.modernEmbeddedMd),mime:'text/markdown'});
+        const name=d.name.replace(/\.md$/i,opts.modernEmbeddedMd?'.modern.joplin.md':'.embedded.md');
+        embedded.push({name,content:embedAssetsInMarkdown(d.content,assetFiles,prefix,!!opts.modernEmbeddedMd,conv,source),mime:'text/markdown'});
       }
       docs.push(...embedded);
       if(!opts.md) docs=docs.filter(d=>!/\.md$/i.test(d.name)||/\.embedded\.md$/i.test(d.name));
@@ -437,9 +460,9 @@
     }
     const embeddedOnly = opts.embeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
     if (embeddedOnly) {
-      const embedded = r.files.find(f => /\.embedded\.md$/i.test(f.name));
+      const embedded = r.files.find(f => /(?:\.embedded\.md|\.modern\.joplin\.md)$/i.test(f.name));
       if (!embedded) throw new Error('Self-contained Markdown could not be generated.');
-      const suffix = opts.modernEmbeddedMd ? '.modern.embedded.md' : '.embedded.md';
+      const suffix = opts.modernEmbeddedMd ? '.modern.joplin.md' : '.embedded.md';
       download(`${r.base}${suffix}`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
     }
