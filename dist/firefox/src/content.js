@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.8 - content script
+// ChatGPT Export v0.6.9 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -811,7 +811,12 @@
     for(let i=0;i<items.length;i++){
       const item=items[i],id=item.conversation_id||item.id,accountId=item._cgxAccountId||null;
       const overall=(sub,label='')=>{
-        const percent=10+82*((i+Math.max(0,Math.min(100,sub))/100)/items.length);
+        // Keep the displayed percentage aligned with the conversation count:
+        // 271/271 must reach 100%, rather than stopping at the old 92% cap.
+        // The finalization steps below stay at 100% so the indicator never
+        // jumps backwards after the last conversation has been read.
+        const progress=i+Math.max(0,Math.min(100,sub))/100;
+        const percent=Math.min(100,Math.round(100*progress/items.length));
         progressPercent(percent,`Conversation ${i+1}/${items.length}${label?` — ${label}`:''}`,i,items.length);
       };
       overall(0,'Starting…');
@@ -831,8 +836,8 @@
       overall(100,'Done.');
       await sleep(DELAY_MS);
     }
-    progressPercent(94,'Finalizing archive…',items.length,items.length);await flush(true);
-    progressPercent(99,'Saving export state…',items.length,items.length);
+    progressPercent(100,'Finalizing archive…',items.length,items.length);await flush(true);
+    progressPercent(100,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
     progressPercent(100,'Export ready.',items.length,items.length);
     return{count:items.length,failed:totalErrors,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts};
