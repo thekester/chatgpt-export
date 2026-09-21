@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.6 - content script
+// ChatGPT Export v0.6.8 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -25,10 +25,78 @@
   let sessionCache = null;
   let busy = false;
   const capabilityState = {};
+  const diagnosticEvents = [];
+  const DIAGNOSTIC_LIMIT = 250;
+
+  function redactDiagnosticText(value) {
+    return String(value == null ? '' : value)
+      .replace(/Bearer\s+[A-Za-z0-9._~-]+/gi, 'Bearer <redacted>')
+      .replace(/([?&](?:access_token|token|auth|key|signature|sig)=)[^&#\s]+/gi, '$1<redacted>')
+      .replace(/(\/(?:conversation|share|files(?:\/download)?)\/)[A-Za-z0-9_-]{8,}/gi, '$1<id>')
+      .replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '<uuid>');
+  }
+
+  function diagnosticDetails(value, depth = 0) {
+    if (value == null || typeof value === 'boolean' || typeof value === 'number') return value;
+    if (typeof value === 'string') return redactDiagnosticText(value);
+    if (value instanceof Error) return {name:value.name||'Error', message:redactDiagnosticText(value.message||value), stack:value.stack?redactDiagnosticText(value.stack):null, status:value.status||null};
+    if (depth > 3) return '[truncated]';
+    if (Array.isArray(value)) return value.slice(0, 30).map(v=>diagnosticDetails(v, depth+1));
+    if (typeof value === 'object') {
+      const out={};
+      for (const [k,v] of Object.entries(value)) {
+        if (/token|authorization|cookie|content|message|text|body|data/i.test(k)) { out[k]='<omitted>'; continue; }
+        out[k]=diagnosticDetails(v, depth+1);
+      }
+      return out;
+    }
+    return redactDiagnosticText(value);
+  }
+
+  function diag(event, details = null) {
+    diagnosticEvents.push({at:new Date().toISOString(), event, ...(details==null?{}:{details:diagnosticDetails(details)})});
+    if (diagnosticEvents.length > DIAGNOSTIC_LIMIT) diagnosticEvents.splice(0, diagnosticEvents.length-DIAGNOSTIC_LIMIT);
+  }
+
+  function resetDiagnostics(kind, opts = null) {
+    diagnosticEvents.length=0;
+    diag('export.start',{kind, options:opts ? {
+      format:opts.format||null, md:!!opts.md, html:!!opts.html, images:!!opts.images, files:!!opts.files, json:!!opts.json,
+      thinking:!!opts.thinking, embeddedMd:!!opts.embeddedMd, modernEmbeddedMd:!!opts.modernEmbeddedMd, branches:!!opts.branches,
+      incremental:!!opts.incremental, checksums:!!opts.checksums, partSizeMB:opts.partSizeMB
+    }:null});
+  }
+
+  function safeDiagnosticPath() {
+    return location.pathname.split('/').map(part=>/^[A-Za-z0-9_-]{16,}$/.test(part)?`<id:${part.length}>`:part).join('/');
+  }
+
+  function targetDiagnosticSummary() {
+    const t=currentTarget();
+    if(!t)return null;
+    return {type:t.type, shareRoute:t.shareRoute||null, id_length:String(t.id||'').length};
+  }
+
+  function diagnosticSnapshot(extra = {}) {
+    let version='unknown'; try{version=api.runtime.getManifest().version||'unknown';}catch(_){}
+    return {
+      schema:1, extension_version:version, generated_at:new Date().toISOString(),
+      page:{origin:location.origin, path:safeDiagnosticPath()}, target:targetDiagnosticSummary(), busy,
+      capabilities:capabilitySnapshot(), events:diagnosticEvents.slice(), ...diagnosticDetails(extra)
+    };
+  }
+
+  function diagnosticLog(extra = {}) {
+    return JSON.stringify({
+      notice:'Diagnostic log generated locally. Conversation text, authentication tokens, query strings, and raw message content are intentionally omitted.',
+      ...diagnosticSnapshot(extra)
+    },null,2)+'\n';
+  }
   function setCapability(name, status, detail = '') {
     const prev = capabilityState[name];
     if (prev && prev.status === 'available' && status !== 'available') return;
-    capabilityState[name] = { status, detail: String(detail || ''), checked_at: new Date().toISOString() };
+    capabilityState[name] = { status, detail: redactDiagnosticText(detail || ''), checked_at: new Date().toISOString() };
+    diag('capability',{name,status,detail});
   }
   function capabilitySnapshot() { return JSON.parse(JSON.stringify(capabilityState)); }
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -82,7 +150,7 @@
       const fallback = await pageFetch(url, {credentials:'include', cache:'no-store', headers:h2});
       if (fallback.ok) { setCapability('account_header_fallback', 'available', 'Request succeeded without ChatGPT-Account-ID.'); return fallback; }
     }
-    if (!res.ok) { const e = new Error(`HTTP ${res.status} sur ${url}`); e.status = res.status; throw e; }
+    if (!res.ok) { const e = new Error(`HTTP ${res.status} sur ${url}`); e.status = res.status; diag('api.error',{status:res.status,url}); throw e; }
     return res;
   }
   const apiGet = async (path, accountId = null) => (await authFetch(path, 0, accountId)).json();
@@ -154,7 +222,7 @@
       return {type:res.headers.get('content-type')||'', bytes:new Uint8Array(await res.arrayBuffer())};
     }
     const r = await api.runtime.sendMessage({type:'cgx-fetch', url:u.href});
-    if (!r || !r.ok) throw new Error((r && r.error) || 'Download failed');
+    if (!r || !r.ok) { const e=new Error((r && r.error) || 'Download failed'); diag('external-media.error',{host:u.hostname,error:e}); throw e; }
     return {type:r.type||'', bytes:b64ToBytes(r.data)};
   }
 
@@ -495,6 +563,7 @@
   }
   function progressPercent(percent,label='',done=null,total=null){
     const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+    diag('progress',{percent:value,label,done,total});
     try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total})).catch(()=>{});}catch(_){}
   }
 
@@ -566,7 +635,8 @@
 
   async function exportCurrent(opts){
     progressPercent(1,'Starting export…');
-    const target=currentTarget(); if(!target)throw new Error('No conversation or shared page is open.');
+    const target=currentTarget(); if(!target){const e=new Error('No conversation or shared page is open.');diag('target.missing',{path:safeDiagnosticPath()});throw e;}
+    diag('target.detected',targetDiagnosticSummary());
     let accountId=null; try { const session=await getSession(); accountId=(session.account&&session.account.id)||cookieAccountId()||null; } catch(e) { setCapability('session_api','unavailable',e.message); }
     progressPercent(4,'Session ready.');
     let r;
@@ -580,9 +650,14 @@
       } else r=await exportConversation(target.id,opts,'',{accountId},null,(p,label)=>progressPercent(5+p*0.9,label));
       setCapability('conversation_api','available');
     } catch (e) {
+      diag('conversation-api.fallback',{error:e});
       setCapability('conversation_api','unavailable',e.message);
       const conv=conversationFromDom(target.id);
       r=await exportConversation(conv.conversation_id,opts,'',{accountId,shared:target.type==='share',shareId:target.type==='share'?target.id:null},conv,(p,label)=>progressPercent(5+p*0.9,label));
+    }
+    if(r.imageFailures||r.fileFailures){
+      diag('export.partial',{imageFailures:r.imageFailures,fileFailures:r.fileFailures});
+      r.files.push({name:'_diagnostic.log',content:diagnosticLog({result:{image_failures:r.imageFailures,file_failures:r.fileFailures}})});
     }
     const embeddedOnly = opts.embeddedMd && !opts.modernEmbeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
     if (embeddedOnly) {
@@ -709,6 +784,7 @@
     if(opts.html&&index.length)files.push({name:'index.html',content:CGX.indexHtml(index)});
     if(meta.projectsIndex&&meta.projectsIndex.length)files.push({name:'projects/project-index.json',content:JSON.stringify(meta.projectsIndex,null,2)});
     if(meta.errors&&meta.errors.length)files.push({name:'_erreurs.txt',content:meta.errors.join('\n')+'\n'});
+    if((meta.errors&&meta.errors.length)||meta.imageFailures||meta.fileFailures)files.push({name:'_diagnostic.log',content:diagnosticLog({result:{conversation_failures:(meta.errors||[]).length,image_failures:meta.imageFailures||0,file_failures:meta.fileFailures||0,part:partNo}})});
     files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(files,{schema_version:4,exported_at:new Date().toISOString(),embedded_markdown:!!opts.embeddedMd,conversation_count:index.length,failures:(meta.errors||[]).length,image_failures:meta.imageFailures||0,file_failures:meta.fileFailures||0,workspace_ids:meta.accounts||[],part:partNo,incremental_since:meta.since||null,capabilities:capabilitySnapshot()},opts.checksums);
     const stamp=new Date().toISOString().slice(0,10);const suffix=partNo>1?`_part-${String(partNo).padStart(3,'0')}`:'';
@@ -751,7 +827,7 @@
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
         index.push({title:r.conv.title||'Untitled',href:`${prefix}conversation.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
-      }catch(e){errors.push(`${item.title||id} : ${e.message}`);}
+      }catch(e){diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);}
       overall(100,'Done.');
       await sleep(DELAY_MS);
     }
@@ -765,13 +841,21 @@
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
-    if(busy){sendResponse({ok:false,error:'An export is already running in this tab.'});return false;}
+    if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
     opts.modernEmbeddedMd = opts.format === 'jex' || !!opts.modernEmbeddedMd;
     opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
-    if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.'});return false;}
+    resetDiagnostics(msg.type,opts);
+    if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
     busy=true;const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
-    job.then(r=>sendResponse({ok:true,...r})).catch(e=>sendResponse({ok:false,error:e.message})).finally(()=>{busy=false;});return true;
+    job.then(r=>{
+      const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
+      diag('export.complete',{count:r.count||0,failed:r.failed||0,imageFailures:r.imageFailures||0,fileFailures:r.fileFailures||0,parts:r.parts||0});
+      sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
+    }).catch(e=>{
+      diag('export.failure',{error:e});
+      sendResponse({ok:false,error:redactDiagnosticText(e.message||e),diagnostics:diagnosticSnapshot({error:e})});
+    }).finally(()=>{busy=false;});return true;
   });
 })();

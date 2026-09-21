@@ -7,6 +7,7 @@ const bar = $("bar");
 const progressWrap = $("progress-wrap");
 const progressPercent = $("progress-percent");
 const status = $("status");
+const btnLog = $("download-log");
 const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
@@ -23,6 +24,99 @@ const ALL_SITES = { origins: ["<all_urls>"] };
 
 let tabId = null;
 let tabChecked = false;
+let activeTabUrl = null;
+let diagnostic = null;
+let diagnosticDownload = null;
+let diagnosticCreatedAt = null;
+let lastProgressLabel = "";
+
+function manifestVersion() {
+  try { return api.runtime.getManifest().version || "unknown"; } catch (_) { return "unknown"; }
+}
+
+function safePageUrl(raw) {
+  try {
+    const u = new URL(raw || "");
+    const path = u.pathname.split("/").map((part) => /^[A-Za-z0-9_-]{16,}$/.test(part) ? `<id:${part.length}>` : part).join("/");
+    return `${u.origin}${path}`;
+  } catch (_) { return "unavailable"; }
+}
+
+function errorDetails(error) {
+  if (!error) return null;
+  return {
+    name: String(error.name || "Error"),
+    message: String(error.message || error),
+    stack: error.stack ? String(error.stack) : null
+  };
+}
+
+function startDiagnostic(type) {
+  diagnostic = {
+    schema: 1,
+    extension: { name: "ChatGPT Markdown Export", version: manifestVersion() },
+    started_at: new Date().toISOString(),
+    export_type: type,
+    page: safePageUrl(activeTabUrl),
+    browser: { user_agent: navigator.userAgent, platform: navigator.platform || null },
+    options: currentOptions(),
+    events: []
+  };
+  diagnosticDownload = null;
+  diagnosticCreatedAt = null;
+  lastProgressLabel = "";
+  btnLog.hidden = true;
+  btnLog.textContent = "Download diagnostic log";
+}
+
+function addDiagnostic(event, details = null) {
+  if (!diagnostic) return;
+  diagnostic.events.push({ at: new Date().toISOString(), event, ...(details ? { details } : {}) });
+  if (diagnostic.events.length > 250) diagnostic.events.splice(0, diagnostic.events.length - 250);
+}
+
+function prepareDiagnosticLog({ error = null, remote = null, result = null } = {}) {
+  if (!diagnostic) startDiagnostic("unknown");
+  diagnostic.finished_at = new Date().toISOString();
+  diagnostic.page = safePageUrl(activeTabUrl);
+  if (error) diagnostic.error = errorDetails(error);
+  if (result) diagnostic.result = result;
+  const payload = {
+    notice: "Diagnostic log generated locally by ChatGPT Markdown Export. Conversation text, authentication tokens, query strings, and raw message content are intentionally not included.",
+    popup: diagnostic,
+    content_script: remote || null
+  };
+  diagnosticDownload = JSON.stringify(payload, null, 2) + "\n";
+  diagnosticCreatedAt = new Date().toISOString();
+  try { localStorage.setItem("cgx-last-diagnostic", JSON.stringify({ created_at: diagnosticCreatedAt, text: diagnosticDownload })); } catch (_) {}
+  btnLog.textContent = "Download diagnostic log";
+  btnLog.hidden = false;
+}
+
+function restoreDiagnosticLog() {
+  try {
+    const saved = JSON.parse(localStorage.getItem("cgx-last-diagnostic") || "null");
+    if (!saved || typeof saved.text !== "string" || !saved.text) return;
+    diagnosticDownload = saved.text;
+    diagnosticCreatedAt = saved.created_at || null;
+    btnLog.textContent = "Download last diagnostic log";
+    btnLog.hidden = false;
+  } catch (_) {}
+}
+
+function downloadDiagnosticLog() {
+  if (!diagnosticDownload) return;
+  const stamp = String(diagnosticCreatedAt || new Date().toISOString()).replace(/[:.]/g, "-");
+  const blob = new Blob([diagnosticDownload], { type: "text/plain;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `chatgpt-export-diagnostic-${stamp}.log`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
 
 // ---------- Saved options ----------
 
@@ -94,7 +188,13 @@ function showProgress(percent = 0, label = "") {
   bar.max = 100;
   bar.value = value;
   progressPercent.textContent = `${value}%`;
-  if (label) setStatus(`${value}% — ${label}`);
+  if (label) {
+    if (diagnostic && (label !== lastProgressLabel || value === 0 || value === 100)) {
+      addDiagnostic("progress", { percent: value, label });
+      lastProgressLabel = label;
+    }
+    setStatus(`${value}% — ${label}`);
+  }
 }
 
 function setStatus(text, isError = false) {
@@ -166,15 +266,65 @@ document.querySelectorAll(".info").forEach((button) => {
   });
 });
 
-async function send(msg) {
-  return api.tabs.sendMessage(tabId, msg);
+const CONTENT_SCRIPT_FILES = [
+  "lib/marked.umd.js",
+  "src/zip.js",
+  "src/render.js",
+  "src/content.js"
+];
+
+function missingReceiver(error) {
+  const text = String((error && error.message) || error || "");
+  return /receiving end does not exist|could not establish connection|message port closed before/i.test(text);
+}
+
+async function injectContentScript() {
+  if (!tabId) throw new Error("No active ChatGPT tab.");
+  addDiagnostic("content-script.inject.start", { files: CONTENT_SCRIPT_FILES });
+  showProgress(1, "Connecting extension to this tab...");
+
+  if (api.scripting && api.scripting.executeScript) {
+    // Inject sequentially so content.js always sees marked, ZIP and renderer globals.
+    for (const file of CONTENT_SCRIPT_FILES) {
+      await api.scripting.executeScript({ target: { tabId }, files: [file] });
+      addDiagnostic("content-script.inject.file", { file });
+    }
+    return;
+  }
+
+  // Compatibility fallback for browsers exposing the legacy API.
+  if (api.tabs && api.tabs.executeScript) {
+    for (const file of CONTENT_SCRIPT_FILES) {
+      await api.tabs.executeScript(tabId, { file, runAt: "document_idle" });
+      addDiagnostic("content-script.inject.file", { file, legacy: true });
+    }
+    return;
+  }
+
+  throw new Error("The page connector could not be injected. Reload the ChatGPT tab and try again.");
+}
+
+async function send(msg, allowInjectionRetry = true) {
+  try {
+    return await api.tabs.sendMessage(tabId, msg);
+  } catch (error) {
+    addDiagnostic("message.send.error", errorDetails(error));
+    if (!allowInjectionRetry || !missingReceiver(error)) throw error;
+    addDiagnostic("message.send.retry", { reason: "missing receiver" });
+    await injectContentScript();
+    // Give the newly injected listener one event-loop turn to register.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    return api.tabs.sendMessage(tabId, msg);
+  }
 }
 
 async function resolveActiveTab() {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   const onChatGPT = tab && /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(tab.url || "");
   tabChecked = true;
+  activeTabUrl = tab && tab.url ? tab.url : null;
   tabId = onChatGPT ? tab.id : null;
+  if (diagnostic) { diagnostic.page = safePageUrl(activeTabUrl); addDiagnostic("tab.resolved", { on_chatgpt: !!onChatGPT, page: diagnostic.page }); }
   refreshButtons();
   return !!tabId;
 }
@@ -193,34 +343,57 @@ async function init() {
 }
 
 async function run(type) {
+  startDiagnostic(type);
+  addDiagnostic("export.requested");
   // Do not preflight the conversation when opening the popup. Resolve the
   // active ChatGPT tab at click time, then let the content script perform all
   // conversation detection, API access, fallbacks and export processing.
   if (!tabId) {
     try {
       if (!(await resolveActiveTab())) {
-        setStatus("Open chatgpt.com in this tab to export.", true);
+        const e = new Error("Open chatgpt.com in this tab to export.");
+        addDiagnostic("export.error", errorDetails(e));
+        prepareDiagnosticLog({ error: e });
+        setStatus(`${e.message} Diagnostic log available below.`, true);
         return;
       }
     } catch (e) {
-      setStatus(e.message || "Could not access the active ChatGPT tab.", true);
+      addDiagnostic("export.error", errorDetails(e));
+      prepareDiagnosticLog({ error: e });
+      setStatus(`${e.message || "Could not access the active ChatGPT tab."} Diagnostic log available below.`, true);
       return;
     }
   }
   setBusy(true);
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
+    addDiagnostic("message.send", { type });
     const r = await send({ type, options: currentOptions() });
-    if (!r.ok) throw new Error(r.error);
+    if (!r.ok) {
+      const err = new Error(r.error || "Export failed.");
+      err.remoteDiagnostics = r.diagnostics || null;
+      throw err;
+    }
+    addDiagnostic("export.response", { count: r.count || 0, failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, parts: r.parts || 0 });
     let text = r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported.");
-    if (r.failed) text += ` ${r.failed} failed; see _errors.txt.`;
+    if (r.failed) text += ` ${r.failed} failed; see _erreurs.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
     showProgress(100);
-    setStatus(text, !!(r.failed || r.imageFailures));
+    const hasIssues = !!(r.failed || r.imageFailures || r.fileFailures);
+    if (hasIssues) {
+      prepareDiagnosticLog({
+        remote: r.diagnostics || null,
+        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, count: r.count || 0, parts: r.parts || 0 }
+      });
+      text += " Diagnostic log available below.";
+    }
+    setStatus(text, hasIssues);
   } catch (e) {
-    setStatus(e.message || "Export failed.", true);
+    addDiagnostic("export.error", errorDetails(e));
+    prepareDiagnosticLog({ error: e, remote: e.remoteDiagnostics || null });
+    setStatus(`${e.message || "Export failed."} Diagnostic log available below.`, true);
   } finally {
     setBusy(false);
   }
@@ -237,7 +410,9 @@ api.runtime.onMessage.addListener((msg) => {
 [...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
+btnLog.addEventListener("click", downloadDiagnosticLog);
 loadOptions();
 updateFormatUI();
 checkPermission();
+restoreDiagnosticLog();
 init();
