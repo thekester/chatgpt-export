@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.9 - content script
+// ChatGPT Export v0.6.10 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -443,7 +443,10 @@
     const allMap=new Map([...imgs.map,...atts.map]);
     report(72,'Rendering conversation…');
     const base=CGX.safeName(conv); let docs=[];
-    const mainName = prefix ? 'conversation' : base;
+    // In a history export, keep the main document next to its metadata and
+    // give it the same basename as the conversation folder.
+    const folderName = prefix ? prefix.replace(/\/+$/,'').split('/').pop() : base;
+    const mainName = folderName || base;
     if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${mainName}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown(conv,currentTurns,opts),allMap))});
     if(opts.html) docs.push({name:`${prefix}${mainName}.html`,content:fill(CGX.toHtml(conv,currentTurns),allMap)});
     for (const b of branchData) {
@@ -471,7 +474,7 @@
     if(opts.json) files.push({name:`${prefix}${prefix?'raw':base}.json`,content:JSON.stringify(conv,null,2)});
     files.push({name:`${prefix}${prefix?'metadata':base+'.metadata'}.json`,content:JSON.stringify(conversationMetadata(conv,currentTurns,source,leaves.length||1,opts),null,2)});
     report(94,'Conversation prepared.');
-    return {conv,base,files,imageFailures:imgs.failed+localized.failed,fileFailures:atts.failed, turns:currentTurns, branchCount:leaves.length||1};
+    return {conv,base,mainName,files,imageFailures:imgs.failed+localized.failed,fileFailures:atts.failed, turns:currentTurns, branchCount:leaves.length||1};
   }
 
   function download(filename,blob){
@@ -830,7 +833,7 @@
         const rBytes=r.files.reduce((n,f)=>n+sizeOf(f),0);
         if(files.length&&bytes+rBytes>maxBytes)await flush();
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
-        index.push({title:r.conv.title||'Untitled',href:`${prefix}conversation.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
+        index.push({title:r.conv.title||'Untitled',href:`${prefix}${r.mainName}.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
       }catch(e){diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);}
       overall(100,'Done.');

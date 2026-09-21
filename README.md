@@ -34,7 +34,7 @@ Ready-to-load builds are generated in `dist/` by the build script:
 python build.py
 ```
 
-The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.9.zip`.
+The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.10.zip`.
 
 ### Chrome, Chromium, and Edge
 
@@ -98,9 +98,9 @@ export.zip
 ├── _diagnostic.log        # only when errors/partial failures occur
 ├── conversations/
 │   └── 2026-09-20_conversation-title/
-│       ├── conversation.md
-│       ├── conversation.html
-│       ├── conversation.embedded.md
+│       ├── conversation-folder-name.md
+│       ├── conversation-folder-name.html
+│       ├── conversation-folder-name.embedded.md
 │       ├── metadata.json
 │       ├── raw.json
 │       ├── images/
@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.9**
+Current version: **0.6.10**
 
 This version adds a downloadable diagnostic log whenever an export fails or completes with partial errors, and keeps the latest log locally so it remains available after reopening the popup. The log records extension/browser context, route shape, options, progress stages, capability checks, sanitized errors and stacks, while intentionally omitting conversation text, tokens, cookies, query strings, and raw message data. It can also be embedded as `_diagnostic.log` in ZIP exports that complete with errors. It can reconnect automatically to already-open ChatGPT tabs after an extension reload, supports namespaced shared-chat URLs such as `/share/e/<id>`, and includes live percentage-based export progress, self-contained MIME/Base64 Markdown, ZIP64, multi-browser builds, Projects/Business and sandbox fallbacks, the DOM fallback, incremental export, full-text indexing, checksums, and capability reporting.
