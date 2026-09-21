@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.0 - content script
+// ChatGPT Export v0.6.3 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -259,7 +259,7 @@
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); target=name; break;
       } catch(_) {}
       if (!target) {
-        target=img.candidates.find(c=>!c.startsWith('asset:')) || '#image-non-recuperee';
+        target=img.candidates.find(c=>!c.startsWith('asset:') && CGX.isArchiveSafeUrl(c)) || '#image-non-recuperee';
         if(enabled) failed++;
       }
       map.set(img.ph,target);
@@ -285,7 +285,7 @@
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); target=name; break;
       } catch(_) {}
       if (!target) {
-        target=f.candidates.find(c=>/^https?:/.test(c)) || f.candidates.find(c=>c.startsWith('sandbox:')) || '#file-not-downloaded';
+        target=f.candidates.find(c=>/^https?:/.test(c) && CGX.isArchiveSafeUrl(c)) || f.candidates.find(c=>c.startsWith('sandbox:')) || '#file-not-downloaded';
         if(enabled) failed++;
       }
       map.set(f.ph,target);
@@ -302,11 +302,11 @@
       if (/\.html$/i.test(d.name) && typeof DOMParser !== 'undefined') {
         try {
           const doc = new DOMParser().parseFromString(d.content, 'text/html');
-          for (const el of doc.querySelectorAll('img[src]')) if (/^https?:/i.test(el.getAttribute('src')||'')) urls.add(el.getAttribute('src'));
+          for (const el of doc.querySelectorAll('img[src]')) if (/^https?:/i.test(el.getAttribute('src')||'') && CGX.isArchiveSafeUrl(el.getAttribute('src')||'')) urls.add(el.getAttribute('src'));
         } catch(_) {}
       }
-      for (const m of d.content.matchAll(/!\[[^\]]*\]\((https?:\/\/[^\s)]+(?:\([^)]*\)[^\s)]*)?)\)/g)) urls.add(m[1]);
-      for (const m of d.content.matchAll(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) urls.add(m[1]);
+      for (const m of d.content.matchAll(/!\[[^\]]*\]\((https?:\/\/[^\s)]+(?:\([^)]*\)[^\s)]*)?)\)/g)) if (CGX.isArchiveSafeUrl(m[1])) urls.add(m[1]);
+      for (const m of d.content.matchAll(/<img[^>]+src=["'](https?:\/\/[^"']+)["']/gi)) if (CGX.isArchiveSafeUrl(m[1])) urls.add(m[1]);
     }
     const repl=new Map(), files=[]; let failed=0, n=0;
     for (const url of urls) {
@@ -363,11 +363,11 @@
     const allMap=new Map([...imgs.map,...atts.map]);
     const base=CGX.safeName(conv); let docs=[];
     const mainName = prefix ? 'conversation' : base;
-    if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${mainName}.md`,content:fill(CGX.toMarkdown(conv,currentTurns,opts),allMap)});
+    if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${mainName}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown(conv,currentTurns,opts),allMap))});
     if(opts.html) docs.push({name:`${prefix}${mainName}.html`,content:fill(CGX.toHtml(conv,currentTurns),allMap)});
     for (const b of branchData) {
       const stem=`branches/branch-${String(b.n).padStart(3,'0')}-${String(b.nodeId).slice(0,8)}`;
-      if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:fill(CGX.toMarkdown({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns,opts),allMap)});
+      if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns,opts),allMap))});
       if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns),allMap)});
     }
     const localized=await localizeEmbeddedImages(docs,prefix,opts.images||opts.embeddedMd,accountId); docs=localized.documents;
@@ -478,8 +478,11 @@
   function progress(done,total){try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',done,total})).catch(()=>{});}catch(_){} }
 
   function currentTarget(){
-    let m=location.pathname.match(/\/c\/([0-9a-f-]{36})/i); if(m)return{type:'conversation',id:m[1]};
-    m=location.pathname.match(/\/share\/([0-9a-f-]{20,})/i); if(m)return{type:'share',id:m[1]};
+    // Conversation identifiers have historically been UUIDs, but the web app
+    // can use opaque identifiers too. The export button should depend on the
+    // route shape, not on one historical ID format.
+    let m=location.pathname.match(/\/c\/([A-Za-z0-9_-]{8,})(?:\/|$)/); if(m)return{type:'conversation',id:m[1]};
+    m=location.pathname.match(/\/share\/([A-Za-z0-9_-]{8,})(?:\/|$)/); if(m)return{type:'share',id:m[1]};
     return null;
   }
 
@@ -508,10 +511,11 @@
       const extra = [];
       for (const a of host.querySelectorAll('a[href]')) {
         const href = a.getAttribute('href') || ''; const label = (a.innerText || a.getAttribute('aria-label') || 'lien').trim();
-        if (/^(https?:|sandbox:)/i.test(href) && !text.includes(href)) extra.push(`[${label || 'lien'}](${href})`);
+        if (/^sandbox:/i.test(href) && !text.includes(href)) extra.push(`[${label || 'lien'}](${href})`);
+        else if (/^https?:/i.test(href) && CGX.isArchiveSafeUrl(href) && !text.includes(href)) extra.push(`[${label || 'lien'}](${href})`);
       }
       for (const img of host.querySelectorAll('img[src]')) {
-        const src = img.getAttribute('src') || ''; if (/^https?:/i.test(src)) extra.push(`![${img.getAttribute('alt') || 'image'}](${src})`);
+        const src = img.getAttribute('src') || ''; if (/^https?:/i.test(src) && CGX.isArchiveSafeUrl(src)) extra.push(`![${img.getAttribute('alt') || 'image'}](${src})`);
       }
       if (extra.length) text += `\n\n${extra.join('\n')}`;
       const id = host.getAttribute('data-message-id') || `dom-${++n}`;
