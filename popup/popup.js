@@ -4,6 +4,8 @@ const btnCurrent = $("current");
 const btnAll = $("all");
 const btnGrant = $("grant");
 const bar = $("bar");
+const progressWrap = $("progress-wrap");
+const progressPercent = $("progress-percent");
 const status = $("status");
 const help = $("help");
 const optImages = $("opt-images");
@@ -20,7 +22,7 @@ const mdHtmlInputs = [...document.querySelectorAll('input[name="md-html"]')];
 const ALL_SITES = { origins: ["<all_urls>"] };
 
 let tabId = null;
-let hasConversation = false;
+let tabChecked = false;
 
 // ---------- Saved options ----------
 
@@ -85,6 +87,16 @@ function saveOptions() {
 
 // ---------- State ----------
 
+
+function showProgress(percent = 0, label = "") {
+  const value = Math.max(0, Math.min(100, Math.round(Number(percent) || 0)));
+  progressWrap.hidden = false;
+  bar.max = 100;
+  bar.value = value;
+  progressPercent.textContent = `${value}%`;
+  if (label) setStatus(`${value}% — ${label}`);
+}
+
 function setStatus(text, isError = false) {
   status.textContent = text;
   status.classList.toggle("error", isError);
@@ -92,8 +104,13 @@ function setStatus(text, isError = false) {
 
 let busy = false;
 function refreshButtons() {
-  btnCurrent.disabled = busy || !tabId || !hasConversation;
-  btnAll.disabled = busy || !tabId || selectedFormat() === "jex";
+  // Keep the actions immediately clickable while the popup is resolving the
+  // active tab. Conversation detection and export work happen only after a
+  // click; we disable the buttons only once we know this is not a ChatGPT tab
+  // or while an export launched from this popup is running.
+  const unavailable = tabChecked && !tabId;
+  btnCurrent.disabled = busy || unavailable;
+  btnAll.disabled = busy || unavailable || selectedFormat() === "jex";
 }
 
 function setBusy(b) {
@@ -153,22 +170,22 @@ async function send(msg) {
   return api.tabs.sendMessage(tabId, msg);
 }
 
-async function init() {
+async function resolveActiveTab() {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   const onChatGPT = tab && /^https:\/\/(chatgpt\.com|chat\.openai\.com)\//.test(tab.url || "");
-  if (!onChatGPT) {
-    tabId = null;
-    refreshButtons();
-    setStatus("Open chatgpt.com in this tab to export.", true);
-    return;
-  }
-  tabId = tab.id;
+  tabChecked = true;
+  tabId = onChatGPT ? tab.id : null;
+  refreshButtons();
+  return !!tabId;
+}
+
+async function init() {
   try {
-    const r = await send({ type: "cgx-ping" });
-    hasConversation = r.hasConversation;
-    setBusy(r.busy);
-    if (r.busy) setStatus("An export is already running in this tab…");
+    if (!(await resolveActiveTab())) {
+      setStatus("Open chatgpt.com in this tab to export.", true);
+    }
   } catch {
+    tabChecked = true;
     tabId = null;
     refreshButtons();
     setStatus("Reload the ChatGPT page, then reopen this window.", true);
@@ -176,9 +193,22 @@ async function init() {
 }
 
 async function run(type) {
+  // Do not preflight the conversation when opening the popup. Resolve the
+  // active ChatGPT tab at click time, then let the content script perform all
+  // conversation detection, API access, fallbacks and export processing.
+  if (!tabId) {
+    try {
+      if (!(await resolveActiveTab())) {
+        setStatus("Open chatgpt.com in this tab to export.", true);
+        return;
+      }
+    } catch (e) {
+      setStatus(e.message || "Could not access the active ChatGPT tab.", true);
+      return;
+    }
+  }
   setBusy(true);
-  setStatus(type === "cgx-export-all" ? "Loading conversation list…" : "Exporting…");
-  if (type === "cgx-export-all") bar.hidden = false;
+  showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
     const r = await send({ type, options: currentOptions() });
     if (!r.ok) throw new Error(r.error);
@@ -187,21 +217,21 @@ async function run(type) {
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
+    showProgress(100);
     setStatus(text, !!(r.failed || r.imageFailures));
   } catch (e) {
     setStatus(e.message || "Export failed.", true);
   } finally {
     setBusy(false);
-    bar.hidden = true;
   }
 }
 
 api.runtime.onMessage.addListener((msg) => {
   if (!msg || msg.type !== "cgx-progress") return;
-  bar.hidden = false;
-  bar.max = msg.total;
-  bar.value = msg.done;
-  setStatus(`Conversation ${Math.min(msg.done + 1, msg.total)} of ${msg.total}…`);
+  const percent = Number.isFinite(Number(msg.percent))
+    ? Number(msg.percent)
+    : (Number(msg.total) > 0 ? (Number(msg.done) / Number(msg.total)) * 100 : 0);
+  showProgress(percent, msg.label || "Processing…");
 });
 
 [...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));

@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.3 - content script
+// ChatGPT Export v0.6.6 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -246,7 +246,7 @@
     return header+body;
   }
 
-  async function collectImages(ctx, convId, enabled, prefix, accountId) {
+  async function collectImages(ctx, convId, enabled, prefix, accountId, onProgress=null) {
     const map=new Map(), files=[]; let failed=0;
     for (let i=0;i<ctx.images.length;i++) {
       const img=ctx.images[i]; let target=null;
@@ -263,11 +263,12 @@
         if(enabled) failed++;
       }
       map.set(img.ph,target);
+      if(onProgress) onProgress(i+1,ctx.images.length);
     }
     return {map,files,failed};
   }
 
-  async function collectFiles(ctx, convId, enabled, prefix, accountId) {
+  async function collectFiles(ctx, convId, enabled, prefix, accountId, onProgress=null) {
     const map=new Map(), files=[]; let failed=0;
     for (let i=0;i<ctx.files.length;i++) {
       const f=ctx.files[i]; let target=null;
@@ -289,13 +290,14 @@
         if(enabled) failed++;
       }
       map.set(f.ph,target);
+      if(onProgress) onProgress(i+1,ctx.files.length);
     }
     return {map,files,failed};
   }
 
   const fill=(text,map)=>text.replace(/CGX(?:IMG|FILE)\d+Z/g,ph=>map.get(ph)||'#');
 
-  async function localizeEmbeddedImages(documents, prefix, enabled, accountId) {
+  async function localizeEmbeddedImages(documents, prefix, enabled, accountId, onProgress=null) {
     if (!enabled) return {documents,files:[],failed:0};
     const urls=new Set();
     for (const d of documents) {
@@ -316,6 +318,7 @@
         const name=`images/embedded-${String(++n).padStart(3,'0')}.${ext}`;
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); repl.set(url,name);
       } catch(_) { failed++; }
+      if(onProgress) onProgress(repl.size+failed,urls.size);
     }
     return {documents:documents.map(d=>({...d,content:[...repl].reduce((s,[a,b])=>s.split(a).join(b),d.content)})),files,failed};
   }
@@ -340,11 +343,14 @@
     };
   }
 
-  async function exportConversation(convId, opts, prefix, source={}, convOverride=null) {
+  async function exportConversation(convId, opts, prefix, source={}, convOverride=null, onProgress=null) {
+    const report=(percent,label)=>{if(onProgress)onProgress(percent,label);};
     const accountId=source.accountId||null;
+    report(3,'Reading conversation…');
     let conv=convOverride || await apiGet(`/backend-api/conversation/${convId}`, accountId);
     if (conv && conv.conversation) conv=conv.conversation;
     conv.conversation_id=conv.conversation_id||conv.id||convId;
+    report(10,'Preparing messages…');
     const ctx=CGX.createContext();
     const currentTurns=CGX.buildTurns(conv,ctx,conv.current_node,opts);
     const leaves=opts.branches ? CGX.branchLeaves(conv) : [conv.current_node].filter(Boolean);
@@ -358,9 +364,16 @@
       }
     }
 
-    const imgs=await collectImages(ctx,conv.conversation_id,opts.images||opts.embeddedMd,prefix,accountId);
-    const atts=await collectFiles(ctx,conv.conversation_id,opts.files||opts.embeddedMd,prefix,accountId);
+    report(18,ctx.images.length?`Processing images (0/${ctx.images.length})…`:'No conversation images to download.');
+    const imgs=await collectImages(ctx,conv.conversation_id,opts.images||opts.embeddedMd,prefix,accountId,(done,total)=>{
+      report(18+Math.round(30*done/Math.max(total,1)),`Processing images (${done}/${total})…`);
+    });
+    report(50,ctx.files.length?`Processing files (0/${ctx.files.length})…`:'No attachments to download.');
+    const atts=await collectFiles(ctx,conv.conversation_id,opts.files||opts.embeddedMd,prefix,accountId,(done,total)=>{
+      report(50+Math.round(20*done/Math.max(total,1)),`Processing files (${done}/${total})…`);
+    });
     const allMap=new Map([...imgs.map,...atts.map]);
+    report(72,'Rendering conversation…');
     const base=CGX.safeName(conv); let docs=[];
     const mainName = prefix ? 'conversation' : base;
     if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${mainName}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown(conv,currentTurns,opts),allMap))});
@@ -370,7 +383,11 @@
       if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns,opts),allMap))});
       if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns),allMap)});
     }
-    const localized=await localizeEmbeddedImages(docs,prefix,opts.images||opts.embeddedMd,accountId); docs=localized.documents;
+    report(78,'Localizing embedded images…');
+    const localized=await localizeEmbeddedImages(docs,prefix,opts.images||opts.embeddedMd,accountId,(done,total)=>{
+      report(78+Math.round(10*done/Math.max(total,1)),`Localizing embedded images (${done}/${total})…`);
+    }); docs=localized.documents;
+    report(89,'Finalizing documents…');
     const assetFiles=[...imgs.files,...atts.files,...localized.files];
     if(opts.embeddedMd){
       const embedded=[];
@@ -385,6 +402,7 @@
     const files=[...docs,...assetFiles];
     if(opts.json) files.push({name:`${prefix}${prefix?'raw':base}.json`,content:JSON.stringify(conv,null,2)});
     files.push({name:`${prefix}${prefix?'metadata':base+'.metadata'}.json`,content:JSON.stringify(conversationMetadata(conv,currentTurns,source,leaves.length||1,opts),null,2)});
+    report(94,'Conversation prepared.');
     return {conv,base,files,imageFailures:imgs.failed+localized.failed,fileFailures:atts.failed, turns:currentTurns, branchCount:leaves.length||1};
   }
 
@@ -475,14 +493,30 @@
     ].join('\n');
     return CGX_buildTar([{name:`${noteId}.md`,content:serialized}, ...resources]);
   }
-  function progress(done,total){try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',done,total})).catch(()=>{});}catch(_){} }
+  function progressPercent(percent,label='',done=null,total=null){
+    const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+    try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total})).catch(()=>{});}catch(_){}
+  }
 
   function currentTarget(){
     // Conversation identifiers have historically been UUIDs, but the web app
-    // can use opaque identifiers too. The export button should depend on the
-    // route shape, not on one historical ID format.
-    let m=location.pathname.match(/\/c\/([A-Za-z0-9_-]{8,})(?:\/|$)/); if(m)return{type:'conversation',id:m[1]};
-    m=location.pathname.match(/\/share\/([A-Za-z0-9_-]{8,})(?:\/|$)/); if(m)return{type:'share',id:m[1]};
+    // can use opaque identifiers too. Shared links can also contain a route
+    // namespace, e.g. /share/e/<id>. Detect the route structurally and use the
+    // last sufficiently long path segment as the share identifier.
+    let m=location.pathname.match(/\/c\/([A-Za-z0-9_-]{8,})(?:\/|$)/);
+    if(m)return{type:'conversation',id:m[1]};
+    const parts=location.pathname.split('/').filter(Boolean);
+    const shareIndex=parts.indexOf('share');
+    if(shareIndex>=0){
+      const tail=parts.slice(shareIndex+1);
+      const valid=part=>/^[A-Za-z0-9_-]{8,}$/.test(part||'');
+      // Standard links are /share/<id>; newer shared-page variants can use
+      // one namespace segment first, e.g. /share/e/<id>. Deliberately inspect
+      // only these first two slots so trailing route fragments cannot be
+      // mistaken for the conversation identifier.
+      const id=valid(tail[0])?tail[0]:(valid(tail[1])?tail[1]:null);
+      if(id)return{type:'share',id,shareRoute:id===tail[1]?tail[0]:null};
+    }
     return null;
   }
 
@@ -494,9 +528,13 @@
   const sizeOf=(f)=>typeof f.content==='string'?new TextEncoder().encode(f.content).length:f.content.byteLength;
   const formatBytes=(n)=>n>=1073741824?`${(n/1073741824).toFixed(1)} Gio`:n>=1048576?`${(n/1048576).toFixed(1)} Mio`:n>=1024?`${(n/1024).toFixed(1)} Kio`:`${n} o`;
 
-  async function addManifest(files, meta, checksums=true) {
-    const listing=[];
-    for (const f of files) listing.push({path:f.name,size:sizeOf(f),sha256:checksums?await sha256Hex(f.content):null});
+  async function addManifest(files, meta, checksums=true, onProgress=null) {
+    const listing=[]; const total=files.length;
+    for (let i=0;i<files.length;i++) {
+      const f=files[i];
+      listing.push({path:f.name,size:sizeOf(f),sha256:checksums?await sha256Hex(f.content):null});
+      if(onProgress) onProgress(i+1,total);
+    }
     files.push({name:'manifest.json',content:JSON.stringify({...meta,files:listing},null,2)});
   }
 
@@ -527,8 +565,10 @@
   }
 
   async function exportCurrent(opts){
+    progressPercent(1,'Starting export…');
     const target=currentTarget(); if(!target)throw new Error('No conversation or shared page is open.');
     let accountId=null; try { const session=await getSession(); accountId=(session.account&&session.account.id)||cookieAccountId()||null; } catch(e) { setCapability('session_api','unavailable',e.message); }
+    progressPercent(4,'Session ready.');
     let r;
     try {
       if(target.type==='share'){
@@ -536,36 +576,45 @@
         setCapability('share_current','available');
         const conv=data.conversation||data;
         const cid=conv.conversation_id||conv.id||target.id;
-        r=await exportConversation(cid,opts,'',{accountId,shared:true,shareId:target.id},conv);
-      } else r=await exportConversation(target.id,opts,'',{accountId});
+        r=await exportConversation(cid,opts,'',{accountId,shared:true,shareId:target.id},conv,(p,label)=>progressPercent(5+p*0.9,label));
+      } else r=await exportConversation(target.id,opts,'',{accountId},null,(p,label)=>progressPercent(5+p*0.9,label));
       setCapability('conversation_api','available');
     } catch (e) {
       setCapability('conversation_api','unavailable',e.message);
       const conv=conversationFromDom(target.id);
-      r=await exportConversation(conv.conversation_id,opts,'',{accountId,shared:target.type==='share',shareId:target.type==='share'?target.id:null},conv);
+      r=await exportConversation(conv.conversation_id,opts,'',{accountId,shared:target.type==='share',shareId:target.type==='share'?target.id:null},conv,(p,label)=>progressPercent(5+p*0.9,label));
     }
     const embeddedOnly = opts.embeddedMd && !opts.modernEmbeddedMd && opts.md && !opts.html && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
     if (embeddedOnly) {
       const embedded = r.files.find(f => /(?:\.embedded\.md|\.modern\.joplin\.md)$/i.test(f.name));
       if (!embedded) throw new Error('Self-contained Markdown could not be generated.');
       const suffix = opts.modernEmbeddedMd ? '.modern.joplin.md' : '.embedded.md';
+      progressPercent(98,'Preparing download…');
       download(`${r.base}${suffix}`, new Blob([embedded.content], {type:'text/markdown;charset=utf-8'}));
+      progressPercent(100,'Export ready.');
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,embeddedOnly:true};
     }
     const markdownOnly = opts.md && !opts.html && !opts.embeddedMd && !opts.images && !opts.files && !opts.json && !opts.branches && !opts.incremental;
     if (markdownOnly) {
       const markdown = r.files.find(f => f.name === `${r.base}.md`);
       if (!markdown) throw new Error('Markdown could not be generated.');
+      progressPercent(98,'Preparing download…');
       download(`${r.base}.md`, new Blob([markdown.content], {type:'text/markdown;charset=utf-8'}));
+      progressPercent(100,'Export ready.');
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,markdownOnly:true};
     }
     if (opts.modernEmbeddedMd) {
+      progressPercent(97,'Building JEX archive…');
       download(`${r.base}.jex`, buildJex(r.conv, r.files));
+      progressPercent(100,'Export ready.');
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,joplin:true};
     }
+    progressPercent(96,'Building manifest…');
     r.files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
-    await addManifest(r.files,{schema_version:4,exported_at:new Date().toISOString(),conversation_count:1,embedded_markdown:!!opts.embeddedMd,capabilities:capabilitySnapshot()},opts.checksums);
+    await addManifest(r.files,{schema_version:4,exported_at:new Date().toISOString(),conversation_count:1,embedded_markdown:!!opts.embeddedMd,capabilities:capabilitySnapshot()},opts.checksums,(done,total)=>progressPercent(96+2*done/Math.max(total,1),`Building manifest (${done}/${total})…`));
+    progressPercent(99,'Building ZIP archive…');
     download(`${r.base}.zip`,CGX_buildZip(r.files));
+    progressPercent(100,'Export ready.');
     return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1};
   }
 
@@ -667,9 +716,11 @@
   }
 
   async function exportAll(opts){
+    progressPercent(1,'Loading conversation list…');
     const last=opts.incremental?await storageGet('cgx-last-full-export'):null;
     const previousIndex=opts.incremental?((await storageGet('cgx-export-index'))||{}):{};
     const listed=await listAll({...opts,since:null});
+    progressPercent(7,`Found ${listed.items.length} conversation${listed.items.length===1?'':'s'}.`);
     const nextIndex={...previousIndex}; const items=[];
     for (const item of listed.items) {
       const id=item.conversation_id||item.id; const key=`${item._cgxAccountId||'personal'}:${id}`;
@@ -682,24 +733,32 @@
     const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
     const flush=async(force=false)=>{if(!files.length&&!force)return;totalErrors+=errors.length;totalImageFailures+=imageFailures;totalFileFailures+=fileFailures;await finalizePart(files,index,{projectsIndex:listed.projectsIndex,errors,imageFailures,fileFailures,accounts:listed.accounts,since:opts.since},opts,part);parts++;part++;files=[];index=[];errors=[];imageFailures=0;fileFailures=0;bytes=0;await sleep(500);};
     for(let i=0;i<items.length;i++){
-      progress(i,items.length);const item=items[i],id=item.conversation_id||item.id,accountId=item._cgxAccountId||null;
+      const item=items[i],id=item.conversation_id||item.id,accountId=item._cgxAccountId||null;
+      const overall=(sub,label='')=>{
+        const percent=10+82*((i+Math.max(0,Math.min(100,sub))/100)/items.length);
+        progressPercent(percent,`Conversation ${i+1}/${items.length}${label?` — ${label}`:''}`,i,items.length);
+      };
+      overall(0,'Starting…');
       try{
         let root=item._cgxProjectId?`projects/${cleanFilename(item._cgxProjectTitle,'Project')}/`:(item._cgxArchived?'archived/':(item._cgxShared?'shared/':'conversations/'));
         if(listed.accounts.filter(Boolean).length>1)root=`workspaces/${cleanFilename(accountId||'personal')}/${root}`;
         let folder=CGX.safeName(item);const key=`${root}${folder}`;if(used.has(key))folder+=`_${String(id).slice(0,8)}`;used.add(`${root}${folder}`);const prefix=`${root}${folder}/`;
         let convOverride=null;
         if(item._cgxShared && !item.mapping && item._cgxShareId){try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){} }
-        const r=await exportConversation(id,opts,prefix,{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
+        const r=await exportConversation(id,opts,prefix,{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride,(p,label)=>overall(p,label));
         const rBytes=r.files.reduce((n,f)=>n+sizeOf(f),0);
         if(files.length&&bytes+rBytes>maxBytes)await flush();
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
         index.push({title:r.conv.title||'Untitled',href:`${prefix}conversation.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
       }catch(e){errors.push(`${item.title||id} : ${e.message}`);}
+      overall(100,'Done.');
       await sleep(DELAY_MS);
     }
-    progress(items.length,items.length);await flush(true);
+    progressPercent(94,'Finalizing archive…',items.length,items.length);await flush(true);
+    progressPercent(99,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
+    progressPercent(100,'Export ready.',items.length,items.length);
     return{count:items.length,failed:totalErrors,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts};
   }
 
