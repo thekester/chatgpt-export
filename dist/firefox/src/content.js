@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.15 - content script
+// ChatGPT Export v0.6.16 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -493,7 +493,7 @@
     return String(text || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trimStart();
   }
 
-  function buildJex(conversation, files) {
+  function buildJexEntries(conversation, files, parentId='') {
     const note = files.find(f => /\.modern\.joplin\.md$/i.test(f.name));
     if (!note) throw new Error('Modern Joplin note is missing.');
     const noteId = jexId();
@@ -539,7 +539,7 @@
       body,
       '',
       `id: ${noteId}`,
-      'parent_id:',
+      `parent_id: ${parentId}`,
       `created_time: ${created}`,
       `updated_time: ${updated}`,
       'is_conflict: 0',
@@ -565,7 +565,22 @@
       'conflict_original_id:',
       'type_: 1'
     ].join('\n');
-    return CGX_buildTar([{name:`${noteId}.md`,content:serialized}, ...resources]);
+    return [{name:`${noteId}.md`,content:serialized}, ...resources];
+  }
+
+  function buildJex(conversation, files) {
+    return CGX_buildTar(buildJexEntries(conversation,files));
+  }
+
+  function jexNotebookEntry(id,title,noteCount){
+    const now=new Date().toISOString();
+    const serialized=[
+      `id: ${id}`,'parent_id:',`title: ${title}`,
+      `created_time: ${now}`,`updated_time: ${now}`,
+      `user_updated_time: ${now}`,'share_id:','is_shared: 0',
+      'deleted_time: 0',`note_count: ${noteCount}`,'type_: 2'
+    ].join('\n');
+    return{name:`${id}.md`,content:serialized};
   }
   function progressPercent(percent,label='',done=null,total=null){
     const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
@@ -806,9 +821,8 @@
   }
 
   async function exportAllJex(opts, listed){
-    const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
-    let files=[], errors=[], parts=0, exported=0, failed=0, bytes=0;
-    const usedNames=new Set();
+    const entries=[]; let errors=[], exported=0, failed=0;
+    const notebookId=jexId();
     const stamp=new Date().toISOString().slice(0,10);
     const startedAt=Date.now();
     const durationLabel=seconds=>{
@@ -827,14 +841,6 @@
       const label=`${completed}/${total} conversations · ${exported} exported · ${failed} failed · elapsed ${durationLabel(elapsed)} · ${eta}${detail?` · ${detail}`:''}`;
       progressPercent(total?Math.round(7+90*completed/total):97,label,completed,total);
     };
-    const flush=async()=>{
-      if(!files.length && !errors.length) return;
-      if(errors.length) files.push({name:'_erreurs.txt',content:errors.join('\n')+'\n'});
-      const suffix=parts?`_part-${String(parts+1).padStart(3,'0')}`:'';
-      download(`chatgpt-joplin-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
-      parts++; files=[]; errors=[]; bytes=0;
-      await sleep(500);
-    };
     for(let i=0;i<listed.items.length;i++){
       const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
       report(i,`processing conversation ${i+1}`);
@@ -845,20 +851,19 @@
         }
         const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
         const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
-        const data=await buildJex(r.conv,r.files).arrayBuffer();
-        let name=CGX.safeName(r.conv);
-        if(usedNames.has(name)) name+=`_${String(id).slice(0,8)}`;
-        usedNames.add(name);
-        if(files.length && bytes+data.byteLength>maxBytes) await flush();
-        files.push({name:`${name}.jex`,content:new Uint8Array(data)}); bytes+=data.byteLength; exported++;
+        entries.push(...buildJexEntries(r.conv,r.files,notebookId));
+        exported++;
       }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
       report(i+1,'conversation processed');
       await sleep(DELAY_MS);
     }
-    await flush();
-    progressPercent(100,`${listed.items.length}/${listed.items.length} conversations · ${exported} exported · ${failed} failed · ${parts} ZIP archive${parts===1?'':'s'} ready`,listed.items.length,listed.items.length);
     if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
-    return{count:exported,failed,parts,joplinHistory:true};
+    entries.unshift(jexNotebookEntry(notebookId,'ChatGPT conversations',exported));
+    progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,listed.items.length,listed.items.length);
+    download(`chatgpt-joplin-export_${stamp}.jex`,CGX_buildTar(entries));
+    if(errors.length)download(`chatgpt-joplin-export_${stamp}_errors.txt`,new Blob([errors.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
+    progressPercent(100,`${listed.items.length}/${listed.items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,listed.items.length,listed.items.length);
+    return{count:exported,failed,parts:1,joplinHistory:true};
   }
 
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}

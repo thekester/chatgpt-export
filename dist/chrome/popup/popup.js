@@ -169,7 +169,7 @@ function updateFormatUI() {
   const jex = selectedFormat() === "jex";
   document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
   $("jex-note").hidden = !jex;
-  btnAll.textContent = jex ? "Export all history (.jex in ZIP)" : "Export all history (.zip)";
+  btnAll.textContent = jex ? "Export all history (one .jex)" : "Export all history (.zip)";
   refreshButtons();
   checkPermission();
 }
@@ -373,9 +373,9 @@ function showFinishedExport(job) {
     return;
   }
   const message = job.joplinHistory
-    ? `${job.count} conversations exported as JEX in ${job.parts} ZIP archive(s). Extract the JEX files, then import them into Joplin.`
+    ? `${job.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
     : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
-  setStatus(job.failed ? `${message} ${job.failed} failed; check the ZIP error report.` : message, !!job.failed);
+  setStatus(job.failed ? `${message} ${job.failed} failed; check the downloaded errors report.` : message, !!job.failed);
   updateActivity([{ label: job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully." }]);
 }
 
@@ -461,9 +461,9 @@ async function run(type) {
     }
     addDiagnostic("export.response", { count: r.count || 0, failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, parts: r.parts || 0 });
     let text = r.joplinHistory
-      ? `${r.count} conversations exported as JEX files inside ${r.parts} ZIP archive(s). Extract them, then import the JEX files into Joplin.`
+      ? `${r.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
       : (r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported."));
-    if (r.failed) text += ` ${r.failed} failed; see _erreurs.txt.`;
+    if (r.failed) text += r.joplinHistory ? ` ${r.failed} failed; see the downloaded errors report.` : ` ${r.failed} failed; see _erreurs.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
