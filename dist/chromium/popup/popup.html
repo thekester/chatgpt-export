@@ -106,6 +106,7 @@
     <label class="option jex-hidden"><input type="checkbox" id="opt-incremental"><span>Incremental history export</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>
     <label class="option jex-hidden"><input type="checkbox" id="opt-checksums"><span>SHA-256 checksums in manifest</span><button class="info" type="button" data-help="Adds a SHA-256 hash for each exported file so the archive can be verified later." aria-label="What do SHA-256 checksums do?">i</button></label>
     <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
+    <label class="number-row jex-only" hidden>Pause between conversations (s) <input type="number" id="opt-jex-delay" min="0" max="30" step="0.5" value="2"></label>
   <p id="jex-note" class="jex-note" hidden>JEX automatically includes the note, images, attachments, and generated files. Exporting all history creates one JEX file containing a single “ChatGPT conversations” notebook with one note per conversation. Import that one file into Joplin. The notes follow Joplin’s active light or dark theme.</p>
   </fieldset>
   <fieldset class="media-mode" aria-label="Markdown flavor">

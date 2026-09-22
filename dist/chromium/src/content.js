@@ -1,10 +1,10 @@
-// ChatGPT Export v0.6.22 - content script
+// ChatGPT Export v0.6.23 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
   const PAGE_SIZE = 100;
   const DELAY_MS = 300;
-  const JEX_CONVERSATION_DELAY_MS = 2000;
+  const DEFAULT_JEX_CONVERSATION_DELAY_MS = 2000;
   const MIME_EXT = {
     "image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","image/svg+xml":"svg","image/avif":"avif",
     "application/pdf":"pdf","text/plain":"txt","text/csv":"csv","application/json":"json","application/zip":"zip",
@@ -888,7 +888,7 @@
           failureDetails.push(detail);liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
-        if(nextIndex<listed.items.length)await sleep(JEX_CONVERSATION_DELAY_MS);
+        if(nextIndex<listed.items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await sleep(delay);}
       }
     };
     await Promise.all(Array.from({length:Math.min(concurrency,listed.items.length)},()=>worker()));

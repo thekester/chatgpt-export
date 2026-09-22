@@ -20,6 +20,7 @@ const optBranches = $("opt-branches");
 const optIncremental = $("opt-incremental");
 const optChecksums = $("opt-checksums");
 const optPartSize = $("opt-part-size");
+const optJexDelay = $("opt-jex-delay");
 const formatInputs = [...document.querySelectorAll('input[name="format"]')];
 const mediaModeInputs = [...document.querySelectorAll('input[name="media-mode"]')];
 const mdHtmlInputs = [...document.querySelectorAll('input[name="md-html"]')];
@@ -169,6 +170,7 @@ function loadOptions() {
   optIncremental.checked = saved.incremental ?? false;
   optChecksums.checked = saved.checksums ?? true;
   optPartSize.value = String(saved.partSizeMB ?? 1024);
+  optJexDelay.value = String(Math.max(0, Math.min(30, Number(saved.jexDelayMs ?? 2000) / 1000)));
 }
 
 function selectedFormat() {
@@ -184,13 +186,15 @@ function currentOptions() {
     format: f, md: jex || f !== "html", html: !jex && f !== "md", images: jex || optImages.checked, files: jex || optFiles.checked, json: jex ? false : optJson.checked, thinking: optThinking.checked,
     mdHtml: mdHtmlInputs.find((el) => el.checked)?.value !== "pure",
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
-    partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024))
+    partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024)),
+    jexDelayMs: Math.max(0, Math.min(30000, Math.round((Number(optJexDelay.value) || 0) * 1000)))
   };
 }
 
 function updateFormatUI() {
   const jex = selectedFormat() === "jex";
   document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
+  document.querySelectorAll(".jex-only").forEach((el) => { el.hidden = !jex; });
   $("jex-note").hidden = !jex;
   btnAll.textContent = jex ? "Export all history (one .jex)" : "Export all history (.zip)";
   refreshButtons();
@@ -532,7 +536,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
   if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 
-[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay].forEach((el) => el.addEventListener("change", saveOptions));
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
 btnLog.addEventListener("click", downloadDiagnosticLog);

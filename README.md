@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.22**
+Current version: **0.6.23**
 
-This version respects the server's `Retry-After` response on HTTP 429, applies longer exponential backoff when the header is absent, and shares the cooldown across requests. It keeps sequential full-history JEX processing with a 2-second pause between conversations and includes live detailed failure logs.
+This version adds a popup setting for the delay between full-history JEX conversations (0–30 seconds, default 2 seconds). It respects the server's `Retry-After` response on HTTP 429, applies longer exponential backoff when the header is absent, and shares the cooldown across requests. Exports remain sequential and include live detailed failure logs.
