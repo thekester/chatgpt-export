@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.23**
+Current version: **0.6.24**
 
-This version adds a popup setting for the delay between full-history JEX conversations (0–30 seconds, default 2 seconds). It respects the server's `Retry-After` response on HTTP 429, applies longer exponential backoff when the header is absent, and shares the cooldown across requests. Exports remain sequential and include live detailed failure logs.
+This version adds a popup action to export a chosen number of conversations instead of the entire discovered history, in JEX or ZIP format. The popup also remembers the JEX delay setting (0–30 seconds, default 2 seconds). Exports respect HTTP 429 cooldowns and provide live detailed failure logs.

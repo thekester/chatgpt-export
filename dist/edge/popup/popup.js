@@ -2,6 +2,7 @@ const api = globalThis.browser ?? globalThis.chrome;
 const $ = (id) => document.getElementById(id);
 const btnCurrent = $("current");
 const btnAll = $("all");
+const btnSelected = $("selected");
 const btnGrant = $("grant");
 const bar = $("bar");
 const progressWrap = $("progress-wrap");
@@ -21,6 +22,7 @@ const optIncremental = $("opt-incremental");
 const optChecksums = $("opt-checksums");
 const optPartSize = $("opt-part-size");
 const optJexDelay = $("opt-jex-delay");
+const optHistoryCount = $("opt-history-count");
 const formatInputs = [...document.querySelectorAll('input[name="format"]')];
 const mediaModeInputs = [...document.querySelectorAll('input[name="media-mode"]')];
 const mdHtmlInputs = [...document.querySelectorAll('input[name="md-html"]')];
@@ -171,6 +173,7 @@ function loadOptions() {
   optChecksums.checked = saved.checksums ?? true;
   optPartSize.value = String(saved.partSizeMB ?? 1024);
   optJexDelay.value = String(Math.max(0, Math.min(30, Number(saved.jexDelayMs ?? 2000) / 1000)));
+  optHistoryCount.value = String(Math.max(1, Math.min(100000, Number(saved.historyCount) || 100)));
 }
 
 function selectedFormat() {
@@ -187,7 +190,8 @@ function currentOptions() {
     mdHtml: mdHtmlInputs.find((el) => el.checked)?.value !== "pure",
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024)),
-    jexDelayMs: Math.max(0, Math.min(30000, Math.round((Number(optJexDelay.value) || 0) * 1000)))
+    jexDelayMs: Math.max(0, Math.min(30000, Math.round((Number(optJexDelay.value) || 0) * 1000))),
+    historyCount: Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100)))
   };
 }
 
@@ -253,6 +257,7 @@ function refreshButtons() {
   const unavailable = tabChecked && !tabId;
   btnCurrent.disabled = busy || unavailable;
   btnAll.disabled = busy || unavailable;
+  btnSelected.disabled = busy || unavailable;
 }
 
 function setBusy(b) {
@@ -451,7 +456,7 @@ function pollExportActivity() {
   }).catch(() => setTimeout(pollExportActivity, 1800));
 }
 
-async function run(type) {
+async function run(type, optionOverrides = {}) {
   if (busy) return;
   let keepBusy = false;
   startDiagnostic(type);
@@ -483,7 +488,7 @@ async function run(type) {
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
     addDiagnostic("message.send", { type });
-    const r = await send({ type, options: currentOptions() });
+    const r = await send({ type, options: { ...currentOptions(), ...optionOverrides } });
     if (!r.ok) {
       const err = new Error(r.error || "Export failed.");
       err.remoteDiagnostics = r.diagnostics || null;
@@ -536,9 +541,10 @@ api.runtime.onMessage.addListener((msg, sender) => {
   if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 
-[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay, optHistoryCount].forEach((el) => el.addEventListener("change", saveOptions));
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
-btnAll.addEventListener("click", () => run("cgx-export-all"));
+btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: 0 }));
+btnSelected.addEventListener("click", () => run("cgx-export-all", { conversationLimit: Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100))) }));
 btnLog.addEventListener("click", downloadDiagnosticLog);
 btnFailures.addEventListener("click", downloadFailureLog);
 loadOptions();

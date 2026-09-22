@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.23 - content script
+// ChatGPT Export v0.6.24 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -845,6 +845,8 @@
   async function exportAllJex(opts, listed){
     const entries=[]; let errors=[], failureDetails=[], exported=0, failed=0;
     const notebookId=jexId();
+    const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
+    const items=limit?listed.items.slice(0,limit):listed.items;
     const concurrency=1;
     let nextIndex=0,completed=0;
     const active=new Set();
@@ -858,7 +860,7 @@
       return `${rest}s`;
     };
     const report=(detail)=>{
-      const total=listed.items.length;
+      const total=items.length;
       const elapsed=(Date.now()-startedAt)/1000;
       const average=completed>0?elapsed/completed:0;
       const remaining=completed>0?average*(total-completed):null;
@@ -870,8 +872,8 @@
     const worker=async()=>{
       while(true){
         const i=nextIndex++;
-        if(i>=listed.items.length)return;
-        const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
+        if(i>=items.length)return;
+        const item=items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
         active.add(String(i+1));report();
         try{
           let convOverride=null;
@@ -888,19 +890,19 @@
           failureDetails.push(detail);liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
-        if(nextIndex<listed.items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await sleep(delay);}
+        if(nextIndex<items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await sleep(delay);}
       }
     };
     await Promise.all(Array.from({length:Math.min(concurrency,listed.items.length)},()=>worker()));
     if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
     entries.unshift(jexNotebookEntry(notebookId,'ChatGPT conversations',exported));
-    progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,listed.items.length,listed.items.length);
+    progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,items.length,items.length);
     download(`chatgpt-joplin-export_${stamp}.jex`,CGX_buildTar(entries));
     if(errors.length){
       download(`chatgpt-joplin-export_${stamp}_errors.txt`,new Blob([errors.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
       download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
     }
-    progressPercent(100,`${listed.items.length}/${listed.items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,listed.items.length,listed.items.length);
+    progressPercent(100,`${items.length}/${items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,items.length,items.length);
     return{count:exported,failed,parts:1,joplinHistory:true,failureDetails};
   }
 
@@ -932,6 +934,8 @@
       item._cgxFingerprint=fingerprint; item._cgxIndexKey=key;
       if (!opts.incremental || !previousIndex[key] || previousIndex[key].fingerprint!==fingerprint) items.push(item);
     }
+    const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
+    if(limit)items.splice(limit);
     if(!items.length)throw new Error(opts.incremental?'No new or modified conversations since the last export.':'No conversations found.');
     let files=[],index=[],used=new Set(),errors=[];let imageFailures=0,fileFailures=0,totalErrors=0,totalImageFailures=0,totalFileFailures=0,part=1,parts=0,bytes=0;
     const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
