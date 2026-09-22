@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.19**
+Current version: **0.6.20**
 
-This version makes the failure log available during the export, so failed conversations can be inspected/downloaded without waiting for the full history run to finish. It also records per-conversation details (HTTP status, error message and stack) and HTTP 429 retries in diagnostics. Full-history JEX remains one notebook with one note per conversation, processing up to three conversations concurrently.
+This version removes parallel conversation processing from full-history JEX export and waits 600 ms between conversations to reduce HTTP 429 rate limits. Failed-conversation logs remain available live and include the HTTP status, error message and stack; HTTP 429 retries are also recorded in diagnostics.

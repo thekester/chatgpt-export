@@ -1,9 +1,10 @@
-// ChatGPT Export v0.6.19 - content script
+// ChatGPT Export v0.6.20 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
   const PAGE_SIZE = 100;
   const DELAY_MS = 300;
+  const JEX_CONVERSATION_DELAY_MS = 600;
   const MIME_EXT = {
     "image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","image/svg+xml":"svg","image/avif":"avif",
     "application/pdf":"pdf","text/plain":"txt","text/csv":"csv","application/json":"json","application/zip":"zip",
@@ -825,7 +826,7 @@
   async function exportAllJex(opts, listed){
     const entries=[]; let errors=[], failureDetails=[], exported=0, failed=0;
     const notebookId=jexId();
-    const concurrency=3;
+    const concurrency=1;
     let nextIndex=0,completed=0;
     const active=new Set();
     const stamp=new Date().toISOString().slice(0,10);
@@ -868,7 +869,7 @@
           failureDetails.push(detail);liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
-        await sleep(DELAY_MS);
+        if(nextIndex<listed.items.length)await sleep(JEX_CONVERSATION_DELAY_MS);
       }
     };
     await Promise.all(Array.from({length:Math.min(concurrency,listed.items.length)},()=>worker()));
