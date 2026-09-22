@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.18 - content script
+// ChatGPT Export v0.6.19 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -27,6 +27,8 @@
   let progressState = null;
   let activityState = [];
   let lastExportState = null;
+  let liveFailureDetails = [];
+  let lastProgressFailureCount = 0;
   const capabilityState = {};
   const diagnosticEvents = [];
   const DIAGNOSTIC_LIMIT = 250;
@@ -590,7 +592,7 @@
       if(activityState.length>8)activityState.shift();
     }
     diag('progress',{percent:value,label,done,total});
-    try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total,activity:activityState})).catch(()=>{});}catch(_){}
+    try{const message={type:'cgx-progress',percent:value,label,done,total,activity:activityState};if(liveFailureDetails.length!==lastProgressFailureCount){message.failures=liveFailureDetails;lastProgressFailureCount=liveFailureDetails.length;}Promise.resolve(api.runtime.sendMessage(message)).catch(()=>{});}catch(_){}
   }
 
   function currentTarget(){
@@ -861,9 +863,9 @@
           entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
         }catch(e){
-          const detail={conversation_index:i+1,error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
+          const detail={conversation_index:i+1,conversation_title:redactDiagnosticText(item.title||'Untitled').slice(0,200),error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
           errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status} — `:''}${detail.message}`);
-          failureDetails.push(detail);failed++;diag('conversation.error',{index:i+1,error:e});
+          failureDetails.push(detail);liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
         await sleep(DELAY_MS);
@@ -950,7 +952,7 @@
   }
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
-    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,lastJob:lastExportState}));return true;}
+    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,failures:liveFailureDetails,lastJob:lastExportState}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
@@ -959,7 +961,7 @@
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
-    busy=true;activityState=[];progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
+    busy=true;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
     const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
     job.then(r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);

@@ -10,6 +10,7 @@ const activityWrap = $("activity-wrap");
 const activityList = $("activity-list");
 const status = $("status");
 const btnLog = $("download-log");
+const btnFailures = $("download-failures");
 const help = $("help");
 const optImages = $("opt-images");
 const optJson = $("opt-json");
@@ -32,6 +33,7 @@ let diagnostic = null;
 let diagnosticDownload = null;
 let diagnosticCreatedAt = null;
 let lastProgressLabel = "";
+let liveFailures = [];
 
 function manifestVersion() {
   try { return api.runtime.getManifest().version || "unknown"; } catch (_) { return "unknown"; }
@@ -118,6 +120,27 @@ function downloadDiagnosticLog() {
   document.body.appendChild(a);
   a.click();
   a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+function updateFailureLog(failures) {
+  if (!Array.isArray(failures)) return;
+  liveFailures = failures;
+  btnFailures.hidden = !liveFailures.length;
+  btnFailures.textContent = `Download failure log (${liveFailures.length})`;
+}
+
+function downloadFailureLog() {
+  if (!liveFailures.length) return;
+  const payload = {
+    notice: "Per-conversation export failures. Conversation contents and authentication data are omitted.",
+    extension_version: manifestVersion(), generated_at: new Date().toISOString(), failures: liveFailures
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2) + "\n"], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a"); a.href = url;
+  a.download = `chatgpt-export-failures-${new Date().toISOString().slice(0, 10)}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 30000);
 }
 
@@ -394,6 +417,7 @@ async function restoreExportActivity() {
         const activeElsewhere = tab.id !== tabId;
         showProgress(progress.percent, `${progress.label || "Export in progress…"}${activeElsewhere ? " · running in another tab" : ""}`);
         updateActivity(state.activity);
+        updateFailureLog(state.failures);
         return true;
       }
       if (state && state.lastJob && Date.now() - state.lastJob.finishedAt < 10 * 60 * 1000) {
@@ -413,6 +437,7 @@ function pollExportActivity() {
       const progress = state.progress || {};
       showProgress(progress.percent, progress.label || "Export in progress…");
       updateActivity(state.activity);
+      updateFailureLog(state.failures);
       setTimeout(pollExportActivity, 1200);
     } else {
       setBusy(false);
@@ -449,6 +474,7 @@ async function run(type) {
   setBusy(true);
   exportTabId = tabId;
   activityWrap.hidden = false;
+  updateFailureLog([]);
   updateActivity([{ label: type === "cgx-export-all" ? "Starting account history scan…" : "Starting conversation export…" }]);
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
@@ -464,6 +490,7 @@ async function run(type) {
       ? `${r.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
       : (r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported."));
     if (r.failed) text += r.joplinHistory ? ` ${r.failed} failed; see the downloaded errors report and diagnostic log.` : ` ${r.failed} failed; see _erreurs.txt.`;
+    updateFailureLog(r.failureDetails);
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
@@ -501,6 +528,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
     : (Number(msg.total) > 0 ? (Number(msg.done) / Number(msg.total)) * 100 : 0);
   showProgress(percent, msg.label || "Processing…");
   updateActivity(msg.activity);
+  updateFailureLog(msg.failures);
   if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 
@@ -508,6 +536,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all"));
 btnLog.addEventListener("click", downloadDiagnosticLog);
+btnFailures.addEventListener("click", downloadFailureLog);
 loadOptions();
 updateFormatUI();
 checkPermission();
