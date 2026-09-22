@@ -24,6 +24,7 @@ const ALL_SITES = { origins: ["<all_urls>"] };
 
 let tabId = null;
 let tabChecked = false;
+let exportTabId = null;
 let activeTabUrl = null;
 let diagnostic = null;
 let diagnosticDownload = null;
@@ -332,9 +333,10 @@ async function resolveActiveTab() {
 
 async function init() {
   try {
-    if (!(await resolveActiveTab())) {
-      setStatus("Open chatgpt.com in this tab to export.", true);
-    }
+    const onChatGPT = await resolveActiveTab();
+    const resumed = await restoreExportActivity();
+    if (resumed) pollExportActivity();
+    if (!onChatGPT && !resumed) setStatus("Open chatgpt.com in this tab to export.", true);
   } catch {
     tabChecked = true;
     tabId = null;
@@ -343,7 +345,69 @@ async function init() {
   }
 }
 
+function showFinishedExport(job) {
+  if (!job) return;
+  const key = `cgx-seen-export-${job.finishedAt}`;
+  if (!job.finishedAt) return;
+  try {
+    if (localStorage.getItem(key)) return;
+    localStorage.setItem(key, "1");
+  } catch (_) {}
+  setBusy(false);
+  if (!job.ok) {
+    setStatus(`The previous export failed: ${job.error || "Unknown error."}`, true);
+    return;
+  }
+  const message = job.joplinHistory
+    ? `${job.count} conversations exported as JEX in ${job.parts} ZIP archive(s). Extract the JEX files, then import them into Joplin.`
+    : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
+  setStatus(job.failed ? `${message} ${job.failed} failed; check the ZIP error report.` : message, !!job.failed);
+}
+
+async function restoreExportActivity() {
+  let tabs = [];
+  try { tabs = await api.tabs.query({ url: ["https://chatgpt.com/*", "https://chat.openai.com/*"] }); } catch (_) { return false; }
+  for (const tab of tabs) {
+    if (tab.id == null) continue;
+    try {
+      const state = await api.tabs.sendMessage(tab.id, { type: "cgx-ping" });
+      if (state && state.busy) {
+        exportTabId = tab.id;
+        activeTabUrl = tab.url || null;
+        setBusy(true);
+        const progress = state.progress || { percent: 0, label: "Export is running in another tab…" };
+        const activeElsewhere = tab.id !== tabId;
+        showProgress(progress.percent, `${progress.label || "Export in progress…"}${activeElsewhere ? " · running in another tab" : ""}`);
+        return true;
+      }
+      if (state && state.lastJob && Date.now() - state.lastJob.finishedAt < 10 * 60 * 1000) {
+        showFinishedExport(state.lastJob);
+      }
+    } catch (_) {}
+  }
+  return false;
+}
+
+function pollExportActivity() {
+  if (exportTabId == null || !busy) return;
+  const sourceTabId = exportTabId;
+  api.tabs.sendMessage(sourceTabId, { type: "cgx-ping" }).then((state) => {
+    if (sourceTabId !== exportTabId) return;
+    if (state && state.busy) {
+      const progress = state.progress || {};
+      showProgress(progress.percent, progress.label || "Export in progress…");
+      setTimeout(pollExportActivity, 1200);
+    } else {
+      setBusy(false);
+      exportTabId = null;
+      if (state && state.lastJob) showFinishedExport(state.lastJob);
+    }
+  }).catch(() => setTimeout(pollExportActivity, 1800));
+}
+
 async function run(type) {
+  if (busy) return;
+  let keepBusy = false;
   startDiagnostic(type);
   addDiagnostic("export.requested");
   // Do not preflight the conversation when opening the popup. Resolve the
@@ -366,6 +430,7 @@ async function run(type) {
     }
   }
   setBusy(true);
+  exportTabId = tabId;
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
     addDiagnostic("message.send", { type });
@@ -394,20 +459,28 @@ async function run(type) {
     }
     setStatus(text, hasIssues);
   } catch (e) {
+    if (/already running in this tab/i.test(e.message || "")) {
+      if (await restoreExportActivity()) { keepBusy = true; pollExportActivity(); return; }
+    }
     addDiagnostic("export.error", errorDetails(e));
     prepareDiagnosticLog({ error: e, remote: e.remoteDiagnostics || null });
     setStatus(`${e.message || "Export failed."} Diagnostic log available below.`, true);
   } finally {
-    setBusy(false);
+    if (!keepBusy) {
+      setBusy(false);
+      exportTabId = null;
+    }
   }
 }
 
-api.runtime.onMessage.addListener((msg) => {
+api.runtime.onMessage.addListener((msg, sender) => {
   if (!msg || msg.type !== "cgx-progress") return;
+  if (exportTabId != null && sender && sender.tab && sender.tab.id !== exportTabId) return;
   const percent = Number.isFinite(Number(msg.percent))
     ? Number(msg.percent)
     : (Number(msg.total) > 0 ? (Number(msg.done) / Number(msg.total)) * 100 : 0);
   showProgress(percent, msg.label || "Processing…");
+  if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 
 [...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize].forEach((el) => el.addEventListener("change", saveOptions));

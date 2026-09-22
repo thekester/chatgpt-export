@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.10 - content script
+// ChatGPT Export v0.6.12 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -24,6 +24,8 @@
 
   let sessionCache = null;
   let busy = false;
+  let progressState = null;
+  let lastExportState = null;
   const capabilityState = {};
   const diagnosticEvents = [];
   const DIAGNOSTIC_LIMIT = 250;
@@ -566,6 +568,7 @@
   }
   function progressPercent(percent,label='',done=null,total=null){
     const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
+    progressState={percent:value,label,done,total,updatedAt:Date.now()};
     diag('progress',{percent:value,label,done,total});
     try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total})).catch(()=>{});}catch(_){}
   }
@@ -785,6 +788,23 @@
     let files=[], errors=[], parts=0, exported=0, failed=0, bytes=0;
     const usedNames=new Set();
     const stamp=new Date().toISOString().slice(0,10);
+    const startedAt=Date.now();
+    const durationLabel=seconds=>{
+      const value=Math.max(0,Math.ceil(seconds));
+      const hours=Math.floor(value/3600), minutes=Math.floor((value%3600)/60), rest=value%60;
+      if(hours)return `${hours}h ${minutes}m`;
+      if(minutes)return `${minutes}m ${rest}s`;
+      return `${rest}s`;
+    };
+    const report=(completed, detail)=>{
+      const total=listed.items.length;
+      const elapsed=(Date.now()-startedAt)/1000;
+      const average=completed>0?elapsed/completed:0;
+      const remaining=completed>0?average*(total-completed):null;
+      const eta=remaining==null?'estimating time left…':`~${durationLabel(remaining)} left`;
+      const label=`${completed}/${total} conversations · ${exported} exported · ${failed} failed · elapsed ${durationLabel(elapsed)} · ${eta}${detail?` · ${detail}`:''}`;
+      progressPercent(total?Math.round(7+90*completed/total):97,label,completed,total);
+    };
     const flush=async()=>{
       if(!files.length && !errors.length) return;
       if(errors.length) files.push({name:'_erreurs.txt',content:errors.join('\n')+'\n'});
@@ -795,7 +815,7 @@
     };
     for(let i=0;i<listed.items.length;i++){
       const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
-      progressPercent(Math.round(100*i/Math.max(listed.items.length,1)),`JEX conversation ${i+1}/${listed.items.length}…`,i,listed.items.length);
+      report(i,`processing conversation ${i+1}`);
       try{
         let convOverride=null;
         if(item._cgxShared && !item.mapping && item._cgxShareId){
@@ -810,10 +830,11 @@
         if(files.length && bytes+data.byteLength>maxBytes) await flush();
         files.push({name:`${name}.jex`,content:new Uint8Array(data)}); bytes+=data.byteLength; exported++;
       }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
+      report(i+1,'conversation processed');
       await sleep(DELAY_MS);
     }
     await flush();
-    progressPercent(100,'JEX archives ready.',listed.items.length,listed.items.length);
+    progressPercent(100,`${listed.items.length}/${listed.items.length} conversations · ${exported} exported · ${failed} failed · ${parts} ZIP archive${parts===1?'':'s'} ready`,listed.items.length,listed.items.length);
     if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
     return{count:exported,failed,parts,joplinHistory:true};
   }
@@ -886,7 +907,7 @@
   }
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
-    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null}));return true;}
+    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,lastJob:lastExportState}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
@@ -895,13 +916,16 @@
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
-    busy=true;const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
+    busy=true;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
+    const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
     job.then(r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
       diag('export.complete',{count:r.count||0,failed:r.failed||0,imageFailures:r.imageFailures||0,fileFailures:r.fileFailures||0,parts:r.parts||0});
+      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin};
       sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
     }).catch(e=>{
       diag('export.failure',{error:e});
+      lastExportState={finishedAt:Date.now(),ok:false,error:redactDiagnosticText(e.message||e)};
       sendResponse({ok:false,error:redactDiagnosticText(e.message||e),diagnostics:diagnosticSnapshot({error:e})});
     }).finally(()=>{busy=false;});return true;
   });
