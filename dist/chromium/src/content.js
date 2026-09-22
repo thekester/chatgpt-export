@@ -1,10 +1,10 @@
-// ChatGPT Export v0.6.21 - content script
+// ChatGPT Export v0.6.22 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
   const PAGE_SIZE = 100;
   const DELAY_MS = 300;
-  const JEX_CONVERSATION_DELAY_MS = 600;
+  const JEX_CONVERSATION_DELAY_MS = 2000;
   const MIME_EXT = {
     "image/jpeg":"jpg","image/png":"png","image/webp":"webp","image/gif":"gif","image/svg+xml":"svg","image/avif":"avif",
     "application/pdf":"pdf","text/plain":"txt","text/csv":"csv","application/json":"json","application/zip":"zip",
