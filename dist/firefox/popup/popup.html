@@ -76,6 +76,7 @@
     input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
     .number-row { justify-content: space-between; }
     .number-row input { width: 84px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); }
+    .field-hint { margin: -4px 0 6px; color: var(--muted); font-size: 11px; }
     #grant { background: transparent; color: var(--accent); border: 1px dashed var(--accent); font-size: 13px; }
     .option { display: flex; align-items: center; gap: 8px; }
     .option > input { flex: 0 0 auto; }
@@ -127,6 +128,7 @@
   <button id="current" type="button">Export this conversation</button>
   <button id="all" type="button">Export all history (.zip)</button>
   <label class="number-row history-limit">Number of conversations <input type="number" id="opt-history-count" min="1" max="100000" step="1" value="100"></label>
+  <p class="field-hint">Limited export selects the most recently updated active conversations. Full history also includes archived, project, and shared conversations.</p>
   <button id="selected" type="button">Export selected conversations</button>
   <div id="progress-wrap" hidden><progress id="bar" value="0" max="100"></progress><span id="progress-percent">0%</span></div>
   <section id="activity-wrap" aria-live="polite" hidden><h2 id="activity-title">Export activity</h2><ol id="activity-list"></ol></section>

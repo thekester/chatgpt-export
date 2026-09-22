@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.24 - content script
+// ChatGPT Export v0.6.25 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -741,9 +741,9 @@
     return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1};
   }
 
-  async function pagedOffset(pathBuilder, accountId,onPage=()=>{}){
+  async function pagedOffset(pathBuilder, accountId,onPage=()=>{},maxItems=Infinity){
     const out=[];let offset=0,total=Infinity;
-    while(offset<total){const page=await apiGet(pathBuilder(offset),accountId);const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch);total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(batch.length<PAGE_SIZE&&total===Infinity)break;await sleep(DELAY_MS);}return out;
+    while(offset<total&&out.length<maxItems){const page=await apiGet(pathBuilder(offset),accountId);const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch.slice(0,Math.max(0,maxItems-out.length)));total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(out.length>=maxItems||batch.length<PAGE_SIZE&&total===Infinity)break;await sleep(DELAY_MS);}return out;
   }
 
   async function listProjects(accountId){
@@ -788,13 +788,13 @@
     }
   }
 
-  async function listRegular(accountId, archived=false,onCount=()=>{}){
+  async function listRegular(accountId, archived=false,onCount=()=>{},maxItems=Infinity){
     try {
-      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,n=>onCount(n));
+      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,n=>onCount(n),maxItems);
       setCapability(archived?'archived_list':'conversation_list','available'); return xs;
     } catch(e) {
       if(!archived){
-        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,n=>onCount(n)); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
+        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,n=>onCount(n),maxItems); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
       } else setCapability('archived_list','unavailable',e.message);
       return [];
     }
@@ -811,6 +811,20 @@
     try{
       announce();
       const session=await getSession(); const accounts=collectAccountIds(session);
+      const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
+      if(limit){
+        for(let accountNo=0;accountNo<accounts.length;accountNo++){
+          const accountId=accounts[accountNo],accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
+          stage=`${accountLabel}scanning recent active conversations (up to ${limit})`;announce();
+          const active=await listRegular(accountId,false,count=>announce(found.length+count),limit);
+          for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});
+        }
+        const byKey=new Map();
+        for(const x of found){const id=x.conversation_id||x.id;if(id)byKey.set(`${x._cgxAccountId||'personal'}:${id}`,x);}
+        const items=[...byKey.values()].sort((a,b)=>timeMs(b.update_time||b.create_time)-timeMs(a.update_time||a.create_time)).slice(0,limit);
+        onProgress(`${items.length} most recent active conversations found · ${elapsed()} elapsed`);
+        return{items,projectsIndex,accounts};
+      }
       for(let accountNo=0;accountNo<accounts.length;accountNo++){
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
