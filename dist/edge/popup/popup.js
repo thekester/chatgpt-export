@@ -375,7 +375,7 @@ function showFinishedExport(job) {
   const message = job.joplinHistory
     ? `${job.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
     : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
-  setStatus(job.failed ? `${message} ${job.failed} failed; check the downloaded errors report.` : message, !!job.failed);
+  setStatus(job.failed ? `${message} ${job.failed} failed; check the downloaded errors report and diagnostic log.` : message, !!job.failed);
   updateActivity([{ label: job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully." }]);
 }
 
@@ -463,7 +463,7 @@ async function run(type) {
     let text = r.joplinHistory
       ? `${r.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
       : (r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported."));
-    if (r.failed) text += r.joplinHistory ? ` ${r.failed} failed; see the downloaded errors report.` : ` ${r.failed} failed; see _erreurs.txt.`;
+    if (r.failed) text += r.joplinHistory ? ` ${r.failed} failed; see the downloaded errors report and diagnostic log.` : ` ${r.failed} failed; see _erreurs.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
@@ -472,7 +472,7 @@ async function run(type) {
     if (hasIssues) {
       prepareDiagnosticLog({
         remote: r.diagnostics || null,
-        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, count: r.count || 0, parts: r.parts || 0 }
+        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, count: r.count || 0, parts: r.parts || 0, conversation_failures: r.failureDetails || [] }
       });
       text += " Diagnostic log available below.";
     }

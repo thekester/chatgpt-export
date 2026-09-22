@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.17 - content script
+// ChatGPT Export v0.6.18 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -144,7 +144,7 @@
     if (session.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
     if (accountId) headers['ChatGPT-Account-ID'] = accountId;
     let res = await pageFetch(url, {credentials:'include', cache:'no-store', headers});
-    if (res.status === 429 && attempt < 5) { await sleep(1000 * 2 ** attempt); return authFetch(url, attempt + 1, accountId, allowAccountFallback); }
+    if (res.status === 429 && attempt < 5) { const delayMs=1000*2**attempt; diag('api.retry',{status:429,attempt:attempt+1,delay_ms:delayMs,url}); await sleep(delayMs); return authFetch(url, attempt + 1, accountId, allowAccountFallback); }
     if (res.status === 401 && attempt === 0) { await getSession(true); return authFetch(url, 1, accountId, allowAccountFallback); }
     // On some personal/Business accounts, the explicit account header may be
     // rejected even though the cookie already points to the correct workspace. Retry without it.
@@ -821,7 +821,7 @@
   }
 
   async function exportAllJex(opts, listed){
-    const entries=[]; let errors=[], exported=0, failed=0;
+    const entries=[]; let errors=[], failureDetails=[], exported=0, failed=0;
     const notebookId=jexId();
     const concurrency=3;
     let nextIndex=0,completed=0;
@@ -860,7 +860,11 @@
           const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
           entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
-        }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
+        }catch(e){
+          const detail={conversation_index:i+1,error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
+          errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status} — `:''}${detail.message}`);
+          failureDetails.push(detail);failed++;diag('conversation.error',{index:i+1,error:e});
+        }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
         await sleep(DELAY_MS);
       }
@@ -870,9 +874,12 @@
     entries.unshift(jexNotebookEntry(notebookId,'ChatGPT conversations',exported));
     progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,listed.items.length,listed.items.length);
     download(`chatgpt-joplin-export_${stamp}.jex`,CGX_buildTar(entries));
-    if(errors.length)download(`chatgpt-joplin-export_${stamp}_errors.txt`,new Blob([errors.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
+    if(errors.length){
+      download(`chatgpt-joplin-export_${stamp}_errors.txt`,new Blob([errors.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
+      download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
+    }
     progressPercent(100,`${listed.items.length}/${listed.items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,listed.items.length,listed.items.length);
-    return{count:exported,failed,parts:1,joplinHistory:true};
+    return{count:exported,failed,parts:1,joplinHistory:true,failureDetails};
   }
 
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}
