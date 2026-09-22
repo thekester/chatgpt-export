@@ -54,6 +54,13 @@
     #progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
     #progress-wrap progress { flex: 1; width: auto; height: 7px; margin: 0; accent-color: var(--accent); }
     #progress-percent { min-width: 38px; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    #activity-wrap { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--accent) 4%, transparent); }
+    #activity-title { margin: 0 0 5px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+    #activity-list { display: grid; gap: 5px; max-height: 112px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
+    #activity-list li { position: relative; padding-left: 13px; color: var(--muted); font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; }
+    #activity-list li::before { position: absolute; left: 1px; top: .45em; width: 6px; height: 6px; border-radius: 50%; background: var(--line); content: ""; }
+    #activity-list li:last-child { color: var(--ink); }
+    #activity-list li:last-child::before { background: var(--accent); }
     #status { min-height: 1.45em; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
     #status.error { color: var(--error); }
     fieldset { border: 0; padding: 0; margin: 0 0 14px; display: grid; gap: 6px; }
@@ -119,6 +126,7 @@
   <button id="current" type="button">Export this conversation</button>
   <button id="all" type="button">Export all history (.zip)</button>
   <div id="progress-wrap" hidden><progress id="bar" value="0" max="100"></progress><span id="progress-percent">0%</span></div>
+  <section id="activity-wrap" aria-live="polite" hidden><h2 id="activity-title">Export activity</h2><ol id="activity-list"></ol></section>
   <p id="status" role="status"></p>
   <button id="download-log" type="button" hidden>Download diagnostic log</button>
   <script src="popup.js"></script>

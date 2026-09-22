@@ -6,6 +6,8 @@ const btnGrant = $("grant");
 const bar = $("bar");
 const progressWrap = $("progress-wrap");
 const progressPercent = $("progress-percent");
+const activityWrap = $("activity-wrap");
+const activityList = $("activity-list");
 const status = $("status");
 const btnLog = $("download-log");
 const help = $("help");
@@ -199,6 +201,17 @@ function showProgress(percent = 0, label = "") {
   }
 }
 
+function updateActivity(entries) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  activityList.replaceChildren();
+  for (const entry of entries.slice(-8)) {
+    const item = document.createElement("li");
+    item.textContent = typeof entry === "string" ? entry : String(entry.label || "Working…");
+    activityList.appendChild(item);
+  }
+  activityWrap.hidden = false;
+}
+
 function setStatus(text, isError = false) {
   status.textContent = text;
   status.classList.toggle("error", isError);
@@ -355,6 +368,7 @@ function showFinishedExport(job) {
   } catch (_) {}
   setBusy(false);
   if (!job.ok) {
+    updateActivity([{ label: `Export failed: ${job.error || "Unknown error."}` }]);
     setStatus(`The previous export failed: ${job.error || "Unknown error."}`, true);
     return;
   }
@@ -362,6 +376,7 @@ function showFinishedExport(job) {
     ? `${job.count} conversations exported as JEX in ${job.parts} ZIP archive(s). Extract the JEX files, then import them into Joplin.`
     : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
   setStatus(job.failed ? `${message} ${job.failed} failed; check the ZIP error report.` : message, !!job.failed);
+  updateActivity([{ label: job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully." }]);
 }
 
 async function restoreExportActivity() {
@@ -378,6 +393,7 @@ async function restoreExportActivity() {
         const progress = state.progress || { percent: 0, label: "Export is running in another tab…" };
         const activeElsewhere = tab.id !== tabId;
         showProgress(progress.percent, `${progress.label || "Export in progress…"}${activeElsewhere ? " · running in another tab" : ""}`);
+        updateActivity(state.activity);
         return true;
       }
       if (state && state.lastJob && Date.now() - state.lastJob.finishedAt < 10 * 60 * 1000) {
@@ -396,6 +412,7 @@ function pollExportActivity() {
     if (state && state.busy) {
       const progress = state.progress || {};
       showProgress(progress.percent, progress.label || "Export in progress…");
+      updateActivity(state.activity);
       setTimeout(pollExportActivity, 1200);
     } else {
       setBusy(false);
@@ -431,6 +448,8 @@ async function run(type) {
   }
   setBusy(true);
   exportTabId = tabId;
+  activityWrap.hidden = false;
+  updateActivity([{ label: type === "cgx-export-all" ? "Starting account history scan…" : "Starting conversation export…" }]);
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
     addDiagnostic("message.send", { type });
@@ -464,6 +483,7 @@ async function run(type) {
     }
     addDiagnostic("export.error", errorDetails(e));
     prepareDiagnosticLog({ error: e, remote: e.remoteDiagnostics || null });
+    updateActivity([{ label: `Export failed: ${e.message || "Unknown error."}` }]);
     setStatus(`${e.message || "Export failed."} Diagnostic log available below.`, true);
   } finally {
     if (!keepBusy) {
@@ -480,6 +500,7 @@ api.runtime.onMessage.addListener((msg, sender) => {
     ? Number(msg.percent)
     : (Number(msg.total) > 0 ? (Number(msg.done) / Number(msg.total)) * 100 : 0);
   showProgress(percent, msg.label || "Processing…");
+  updateActivity(msg.activity);
   if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 

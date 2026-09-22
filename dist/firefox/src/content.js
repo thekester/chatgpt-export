@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.13 - content script
+// ChatGPT Export v0.6.14 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -25,6 +25,7 @@
   let sessionCache = null;
   let busy = false;
   let progressState = null;
+  let activityState = [];
   let lastExportState = null;
   const capabilityState = {};
   const diagnosticEvents = [];
@@ -569,8 +570,12 @@
   function progressPercent(percent,label='',done=null,total=null){
     const value=Math.max(0,Math.min(100,Math.round(Number(percent)||0)));
     progressState={percent:value,label,done,total,updatedAt:Date.now()};
+    if(label && (!activityState.length || activityState[activityState.length-1].label!==label)){
+      activityState.push({label,at:Date.now()});
+      if(activityState.length>8)activityState.shift();
+    }
     diag('progress',{percent:value,label,done,total});
-    try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total})).catch(()=>{});}catch(_){}
+    try{Promise.resolve(api.runtime.sendMessage({type:'cgx-progress',percent:value,label,done,total,activity:activityState})).catch(()=>{});}catch(_){}
   }
 
   function currentTarget(){
@@ -924,7 +929,7 @@
   }
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
-    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,lastJob:lastExportState}));return true;}
+    if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,lastJob:lastExportState}));return true;}
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
@@ -933,7 +938,7 @@
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
-    busy=true;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
+    busy=true;activityState=[];progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
     const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
     job.then(r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
