@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.20**
+Current version: **0.6.21**
 
-This version removes parallel conversation processing from full-history JEX export and waits 600 ms between conversations to reduce HTTP 429 rate limits. Failed-conversation logs remain available live and include the HTTP status, error message and stack; HTTP 429 retries are also recorded in diagnostics.
+This version respects the server's `Retry-After` response on HTTP 429, applies longer exponential backoff when the header is absent, and shares the cooldown across requests. It keeps sequential full-history JEX processing with a 600 ms pause between conversations and includes live detailed failure logs.

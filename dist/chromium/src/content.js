@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.20 - content script
+// ChatGPT Export v0.6.21 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -30,6 +30,7 @@
   let lastExportState = null;
   let liveFailureDetails = [];
   let lastProgressFailureCount = 0;
+  let rateLimitUntil = 0;
   const capabilityState = {};
   const diagnosticEvents = [];
   const DIAGNOSTIC_LIMIT = 250;
@@ -141,13 +142,31 @@
     return ids.length ? ids : [null];
   }
 
+  function retryAfterMs(response) {
+    const value=response.headers&&response.headers.get('Retry-After');
+    if(!value)return null;
+    const seconds=Number(value);
+    if(Number.isFinite(seconds)&&seconds>=0)return seconds*1000;
+    const date=Date.parse(value);
+    return Number.isFinite(date)?Math.max(0,date-Date.now()):null;
+  }
+  async function waitForRateLimit() {
+    while(rateLimitUntil>Date.now())await sleep(rateLimitUntil-Date.now());
+  }
   async function authFetch(url, attempt = 0, accountId = null, allowAccountFallback = true) {
+    await waitForRateLimit();
     const session = await getSession();
     const headers = {Accept:'*/*'};
     if (session.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
     if (accountId) headers['ChatGPT-Account-ID'] = accountId;
     let res = await pageFetch(url, {credentials:'include', cache:'no-store', headers});
-    if (res.status === 429 && attempt < 5) { const delayMs=1000*2**attempt; diag('api.retry',{status:429,attempt:attempt+1,delay_ms:delayMs,url}); await sleep(delayMs); return authFetch(url, attempt + 1, accountId, allowAccountFallback); }
+    if (res.status === 429) {
+      const serverDelay=retryAfterMs(res);
+      const delayMs=serverDelay==null?Math.min(5000*2**attempt,120000):serverDelay;
+      rateLimitUntil=Math.max(rateLimitUntil,Date.now()+delayMs);
+      diag(attempt<6?'api.retry':'api.retry_exhausted',{status:429,attempt:attempt+1,max_retries:6,delay_ms:delayMs,retry_after:res.headers&&res.headers.get('Retry-After'),url});
+      if(attempt<6)return authFetch(url,attempt+1,accountId,allowAccountFallback);
+    }
     if (res.status === 401 && attempt === 0) { await getSession(true); return authFetch(url, 1, accountId, allowAccountFallback); }
     // On some personal/Business accounts, the explicit account header may be
     // rejected even though the cookie already points to the correct workspace. Retry without it.
