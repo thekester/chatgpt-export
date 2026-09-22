@@ -64,7 +64,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 
 | Option | Effect |
 | --- | --- |
-| Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation. |
+| Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation; **Export all history** creates one `.jex` per conversation and groups them into size-limited ZIP archive(s). |
 | Save images in a separate directory | Downloads images into an `images/` directory inside the export archive and keeps Markdown links to them. |
 | Save attachments and generated files in a separate directory | Preserves documents and generated files in a `files/` directory inside the export archive and keeps Markdown links to them. |
 | Markdown flavor | Choose **Markdown with HTML elements** or **Pure Markdown only**. It controls whether the Markdown file is allowed to contain raw HTML tags, and changes how a user question is rendered (see below). |
@@ -79,7 +79,7 @@ When **Embed media in Markdown (Base64)** is selected as the only save option, t
 
 The standard self-contained format keeps the export as plain Markdown with embedded Base64 resources. The **JEX** format creates a native `.jex` archive with the metadata fields supported by Joplin, including title, creation/update dates, source, author, and tags. Images and files are stored as Joplin resources referenced from the note, instead of putting large Data URIs in the note. The note uses theme-neutral Markdown and follows Joplin’s active light or dark theme.
 
-Select **JEX** when importing into Joplin. The extension creates a native `.jex` file for the current conversation. Select **File → Import → JEX** and choose that file. Joplin imports the note, images, and files directly into its own database, without external links. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably, not for large Joplin notes. The **Export all history** action remains available for ZIP exports, not JEX.
+Select **JEX** when importing into Joplin. **Export this conversation** creates one `.jex`; **Export all history** creates one `.jex` per accessible conversation and packages those files into one or more ZIP archives. Extract the ZIP archive(s), then select **File → Import → JEX** in Joplin and import the extracted files. Each JEX contains its note and any downloaded images or files. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably, not for large Joplin notes.
 
 JEX imports a note, not a standalone file outside Joplin’s notebook structure. Joplin places a note without a specified parent notebook into a default notebook, usually named `Imported`. This is expected Joplin behavior. You can move the note to any existing notebook after import.
 

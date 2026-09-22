@@ -166,6 +166,7 @@ function updateFormatUI() {
   const jex = selectedFormat() === "jex";
   document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
   $("jex-note").hidden = !jex;
+  btnAll.textContent = jex ? "Export all history (.jex in ZIP)" : "Export all history (.zip)";
   refreshButtons();
   checkPermission();
 }
@@ -210,7 +211,7 @@ function refreshButtons() {
   // or while an export launched from this popup is running.
   const unavailable = tabChecked && !tabId;
   btnCurrent.disabled = busy || unavailable;
-  btnAll.disabled = busy || unavailable || selectedFormat() === "jex";
+  btnAll.disabled = busy || unavailable;
 }
 
 function setBusy(b) {
@@ -375,7 +376,9 @@ async function run(type) {
       throw err;
     }
     addDiagnostic("export.response", { count: r.count || 0, failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, parts: r.parts || 0 });
-    let text = r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported.");
+    let text = r.joplinHistory
+      ? `${r.count} conversations exported as JEX files inside ${r.parts} ZIP archive(s). Extract them, then import the JEX files into Joplin.`
+      : (r.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : (r.count > 1 ? `${r.count} conversations exported.` : "Conversation exported."));
     if (r.failed) text += ` ${r.failed} failed; see _erreurs.txt.`;
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;

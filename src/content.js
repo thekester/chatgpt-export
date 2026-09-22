@@ -780,6 +780,44 @@
     return{items,projectsIndex,accounts};
   }
 
+  async function exportAllJex(opts, listed){
+    const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
+    let files=[], errors=[], parts=0, exported=0, failed=0, bytes=0;
+    const usedNames=new Set();
+    const stamp=new Date().toISOString().slice(0,10);
+    const flush=async()=>{
+      if(!files.length && !errors.length) return;
+      if(errors.length) files.push({name:'_erreurs.txt',content:errors.join('\n')+'\n'});
+      const suffix=parts?`_part-${String(parts+1).padStart(3,'0')}`:'';
+      download(`chatgpt-joplin-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
+      parts++; files=[]; errors=[]; bytes=0;
+      await sleep(500);
+    };
+    for(let i=0;i<listed.items.length;i++){
+      const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
+      progressPercent(Math.round(100*i/Math.max(listed.items.length,1)),`JEX conversation ${i+1}/${listed.items.length}…`,i,listed.items.length);
+      try{
+        let convOverride=null;
+        if(item._cgxShared && !item.mapping && item._cgxShareId){
+          try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){}
+        }
+        const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
+        const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
+        const data=await buildJex(r.conv,r.files).arrayBuffer();
+        let name=CGX.safeName(r.conv);
+        if(usedNames.has(name)) name+=`_${String(id).slice(0,8)}`;
+        usedNames.add(name);
+        if(files.length && bytes+data.byteLength>maxBytes) await flush();
+        files.push({name:`${name}.jex`,content:new Uint8Array(data)}); bytes+=data.byteLength; exported++;
+      }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
+      await sleep(DELAY_MS);
+    }
+    await flush();
+    progressPercent(100,'JEX archives ready.',listed.items.length,listed.items.length);
+    if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
+    return{count:exported,failed,parts,joplinHistory:true};
+  }
+
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}
   async function storageSet(obj){try{await api.storage.local.set(obj);}catch(_){} }
 
@@ -800,6 +838,7 @@
     const previousIndex=opts.incremental?((await storageGet('cgx-export-index'))||{}):{};
     const listed=await listAll({...opts,since:null});
     progressPercent(7,`Found ${listed.items.length} conversation${listed.items.length===1?'':'s'}.`);
+    if(opts.format==='jex') return exportAllJex(opts,listed);
     const nextIndex={...previousIndex}; const items=[];
     for (const item of listed.items) {
       const id=item.conversation_id||item.id; const key=`${item._cgxAccountId||'personal'}:${id}`;
