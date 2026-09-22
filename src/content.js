@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.12 - content script
+// ChatGPT Export v0.6.13 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -760,27 +760,44 @@
 
   function timeMs(v){if(v==null)return 0;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:0;}
 
-  async function listAll(opts){
-    const session=await getSession(); const accounts=collectAccountIds(session); const found=[]; const projectsIndex=[];
-    for(const accountId of accounts){
-      for (const archived of [false,true]) {
-        const xs=await listRegular(accountId,archived); for(const x of xs)found.push({...x,_cgxArchived:archived,_cgxAccountId:accountId});
+  async function listAll(opts,onProgress=()=>{}){
+    const startedAt=Date.now(); let stage='Connecting to the account…';
+    const found=[]; const projectsIndex=[];
+    const elapsed=()=>{const s=Math.floor((Date.now()-startedAt)/1000);return s>=60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;};
+    const announce=()=>onProgress(`${stage} · ${found.length} found · ${elapsed()} elapsed`);
+    const heartbeat=setInterval(announce,5000);
+    try{
+      announce();
+      const session=await getSession(); const accounts=collectAccountIds(session);
+      for(let accountNo=0;accountNo<accounts.length;accountNo++){
+        const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
+        stage=`${accountLabel}scanning active conversations`;announce();
+        const active=await listRegular(accountId,false); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});
+        stage=`${accountLabel}scanning archived conversations`;announce();
+        const archived=await listRegular(accountId,true); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});
+        stage=`${accountLabel}finding projects`;announce();
+        try{
+          const projects=await listProjects(accountId);
+          for(let projectNo=0;projectNo<projects.length;projectNo++){
+            const p=projects[projectNo],pid=p.id||p.gizmo_id||p.project_id;if(!pid)continue;
+            const pname=(p.display&&p.display.name)||p.name||p.title||'Project';
+            stage=`${accountLabel}scanning project ${projectNo+1}/${projects.length}`;announce();
+            let xs=[];try{xs=await listProjectConversations(p,accountId);}catch(e){setCapability('project_conversations','unavailable',e.message);}
+            projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
+            for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
+          }
+        }catch(_){}
+        stage=`${accountLabel}scanning shared conversations`;announce();
+        for(const sh of await listShared(accountId)) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});
       }
-      try{
-        for(const p of await listProjects(accountId)){
-          const pid=p.id||p.gizmo_id||p.project_id;if(!pid)continue;const pname=(p.display&&p.display.name)||p.name||p.title||'Project';
-          let xs=[];try{xs=await listProjectConversations(p,accountId);}catch(e){setCapability('project_conversations','unavailable',e.message);}
-          projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
-          for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
-        }
-      }catch(_){}
-      for(const sh of await listShared(accountId)) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});
-    }
-    const byKey=new Map();
-    for(const x of found){const id=x.conversation_id||x.id;if(!id)continue;const key=`${x._cgxAccountId||'personal'}:${id}`;const prev=byKey.get(key);if(prev){byKey.set(key,{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)});}else byKey.set(key,x);}
-    let items=[...byKey.values()];
-    if(opts.since){const since=Number(opts.since)||0;items=items.filter(x=>timeMs(x.update_time||x.create_time)>since);}
-    return{items,projectsIndex,accounts};
+      stage='Removing duplicates and preparing the export';announce();
+      const byKey=new Map();
+      for(const x of found){const id=x.conversation_id||x.id;if(!id)continue;const key=`${x._cgxAccountId||'personal'}:${id}`;const prev=byKey.get(key);if(prev){byKey.set(key,{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)});}else byKey.set(key,x);}
+      let items=[...byKey.values()];
+      if(opts.since){const since=Number(opts.since)||0;items=items.filter(x=>timeMs(x.update_time||x.create_time)>since);}
+      onProgress(`${items.length} unique conversations found · ${elapsed()} elapsed`);
+      return{items,projectsIndex,accounts};
+    }finally{clearInterval(heartbeat);}
   }
 
   async function exportAllJex(opts, listed){
@@ -854,10 +871,10 @@
   }
 
   async function exportAll(opts){
-    progressPercent(1,'Loading conversation list…');
+    progressPercent(1,'Searching account history…');
     const last=opts.incremental?await storageGet('cgx-last-full-export'):null;
     const previousIndex=opts.incremental?((await storageGet('cgx-export-index'))||{}):{};
-    const listed=await listAll({...opts,since:null});
+    const listed=await listAll({...opts,since:null},label=>progressPercent(1,label));
     progressPercent(7,`Found ${listed.items.length} conversation${listed.items.length===1?'':'s'}.`);
     if(opts.format==='jex') return exportAllJex(opts,listed);
     const nextIndex={...previousIndex}; const items=[];

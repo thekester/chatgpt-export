@@ -34,7 +34,7 @@ Ready-to-load builds are generated in `dist/` by the build script:
 python build.py
 ```
 
-The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.12.zip`.
+The script creates builds for Chrome, Chromium, Edge, and Firefox. Each build also includes a versioned ZIP archive such as `chatgpt-export-chrome-0.6.13.zip`.
 
 ### Chrome, Chromium, and Edge
 
@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.12**
+Current version: **0.6.13**
 
-This version restores the running export’s progress when the popup is reopened, prevents a second export while one is already running in an open ChatGPT tab, and reports elapsed time and estimated time remaining during full-history JEX exports. It also includes full-history JEX ZIP export, conversation-named documents, percentage-based progress, downloadable privacy-conscious diagnostics, self-contained Markdown, ZIP64, multi-browser builds, Projects/Business and sandbox fallbacks, incremental export, indexing, checksums, and capability reporting.
+This version reports which parts of the account history are being searched, how many conversations have been found, and how long discovery has taken, with periodic updates. It restores running export progress when the popup is reopened, prevents a second export during an active job, and estimates elapsed and remaining time during full-history JEX exports. It also includes full-history JEX ZIP export, conversation-named documents, downloadable diagnostics, self-contained Markdown, ZIP64, multi-browser builds, incremental export, indexing, and checksums.
