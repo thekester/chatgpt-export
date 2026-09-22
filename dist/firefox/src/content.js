@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.16 - content script
+// ChatGPT Export v0.6.17 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -823,6 +823,9 @@
   async function exportAllJex(opts, listed){
     const entries=[]; let errors=[], exported=0, failed=0;
     const notebookId=jexId();
+    const concurrency=3;
+    let nextIndex=0,completed=0;
+    const active=new Set();
     const stamp=new Date().toISOString().slice(0,10);
     const startedAt=Date.now();
     const durationLabel=seconds=>{
@@ -832,31 +835,37 @@
       if(minutes)return `${minutes}m ${rest}s`;
       return `${rest}s`;
     };
-    const report=(completed, detail)=>{
+    const report=(detail)=>{
       const total=listed.items.length;
       const elapsed=(Date.now()-startedAt)/1000;
       const average=completed>0?elapsed/completed:0;
       const remaining=completed>0?average*(total-completed):null;
       const eta=remaining==null?'estimating time left…':`~${durationLabel(remaining)} left`;
-      const label=`${completed}/${total} conversations · ${exported} exported · ${failed} failed · elapsed ${durationLabel(elapsed)} · ${eta}${detail?` · ${detail}`:''}`;
+      const inProgress=active.size?`processing ${[...active].join(', ')} (${active.size} active)`:'waiting for workers';
+      const label=`${completed}/${total} conversations · ${exported} exported · ${failed} failed · elapsed ${durationLabel(elapsed)} · ${eta} · ${detail||inProgress}`;
       progressPercent(total?Math.round(7+90*completed/total):97,label,completed,total);
     };
-    for(let i=0;i<listed.items.length;i++){
-      const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
-      report(i,`processing conversation ${i+1}`);
-      try{
-        let convOverride=null;
-        if(item._cgxShared && !item.mapping && item._cgxShareId){
-          try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){}
-        }
-        const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
-        const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
-        entries.push(...buildJexEntries(r.conv,r.files,notebookId));
-        exported++;
-      }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
-      report(i+1,'conversation processed');
-      await sleep(DELAY_MS);
-    }
+    const worker=async()=>{
+      while(true){
+        const i=nextIndex++;
+        if(i>=listed.items.length)return;
+        const item=listed.items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
+        active.add(String(i+1));report();
+        try{
+          let convOverride=null;
+          if(item._cgxShared && !item.mapping && item._cgxShareId){
+            try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){}
+          }
+          const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
+          const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
+          entries.push(...buildJexEntries(r.conv,r.files,notebookId));
+          exported++;
+        }catch(e){errors.push(`${item.title||id} : ${e.message}`);failed++;diag('conversation.error',{index:i+1,error:e});}
+        active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
+        await sleep(DELAY_MS);
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(concurrency,listed.items.length)},()=>worker()));
     if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
     entries.unshift(jexNotebookEntry(notebookId,'ChatGPT conversations',exported));
     progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,listed.items.length,listed.items.length);

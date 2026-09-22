@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.16**
+Current version: **0.6.17**
 
-This version exports full history as one JEX notebook with one note per conversation. It includes the activity panel, resumable popup status, live history discovery counts and export time estimates, conversation-named documents, downloadable diagnostics, self-contained Markdown, ZIP64, and multi-browser builds.
+This version exports full history as one JEX notebook with one note per conversation, processing up to three conversations concurrently to reduce export time. It includes the activity panel, resumable popup status, live history discovery counts and export time estimates, conversation-named documents, downloadable diagnostics, self-contained Markdown, ZIP64, and multi-browser builds.
