@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.14 - content script
+// ChatGPT Export v0.6.15 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -704,9 +704,9 @@
     return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1};
   }
 
-  async function pagedOffset(pathBuilder, accountId){
+  async function pagedOffset(pathBuilder, accountId,onPage=()=>{}){
     const out=[];let offset=0,total=Infinity;
-    while(offset<total){const page=await apiGet(pathBuilder(offset),accountId);const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch);total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;if(batch.length<PAGE_SIZE&&total===Infinity)break;await sleep(DELAY_MS);}return out;
+    while(offset<total){const page=await apiGet(pathBuilder(offset),accountId);const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch);total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(batch.length<PAGE_SIZE&&total===Infinity)break;await sleep(DELAY_MS);}return out;
   }
 
   async function listProjects(accountId){
@@ -729,35 +729,35 @@
     return projects;
   }
 
-  async function listProjectConversations(project,accountId){
+  async function listProjectConversations(project,accountId,onCount=()=>{}){
     const projectId=typeof project==='string'?project:(project.id||project.gizmo_id||project.project_id);
     const preview=(project && project._cgxSidebarItem && (project._cgxSidebarItem.conversations||project._cgxSidebarItem.items)) || project.conversations || [];
-    const out=[...preview]; let cursor='0'; let fetched=false;
+    const out=[...preview]; let cursor='0'; let fetched=false;onCount(out.length);
     while(cursor!=null){
       const r=await tryApiGet(`/backend-api/gizmos/${encodeURIComponent(projectId)}/conversations?cursor=${encodeURIComponent(cursor)}`,accountId,'project_conversations');
-      if(!r.ok) break; fetched=true; const data=r.data; out.push(...(data.items||data.conversations||[])); cursor=data.cursor||data.next_cursor||null;if(cursor)await sleep(DELAY_MS);
+      if(!r.ok) break; fetched=true; const data=r.data; out.push(...(data.items||data.conversations||[]));onCount(out.length); cursor=data.cursor||data.next_cursor||null;if(cursor)await sleep(DELAY_MS);
     }
     const seen=new Map(); for(const x of out){const id=x&& (x.conversation_id||x.id);if(id)seen.set(id,x);} 
     if(!fetched && preview.length) setCapability('project_conversations','fallback','Using previews available in the Projects sidebar.');
     return [...seen.values()];
   }
 
-  async function listShared(accountId){
-    try{const xs=await pagedOffset(o=>`/backend-api/shared_conversations?offset=${o}&limit=${PAGE_SIZE}&order=created`,accountId);setCapability('shared_list','available');return xs;}
+  async function listShared(accountId,onCount=()=>{}){
+    try{const xs=await pagedOffset(o=>`/backend-api/shared_conversations?offset=${o}&limit=${PAGE_SIZE}&order=created`,accountId,n=>onCount(n));setCapability('shared_list','available');return xs;}
     catch(e){
       const r=await tryApiGet('/backend-api/shared_conversations?order=created',accountId,'shared_list');
-      if(r.ok)return r.data.items||r.data.conversations||[];
+      if(r.ok){const xs=r.data.items||r.data.conversations||[];onCount(xs.length);return xs;}
       return[];
     }
   }
 
-  async function listRegular(accountId, archived=false){
+  async function listRegular(accountId, archived=false,onCount=()=>{}){
     try {
-      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId);
+      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,n=>onCount(n));
       setCapability(archived?'archived_list':'conversation_list','available'); return xs;
     } catch(e) {
       if(!archived){
-        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
+        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,n=>onCount(n)); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
       } else setCapability('archived_list','unavailable',e.message);
       return [];
     }
@@ -767,9 +767,9 @@
 
   async function listAll(opts,onProgress=()=>{}){
     const startedAt=Date.now(); let stage='Connecting to the account…';
-    const found=[]; const projectsIndex=[];
+    const found=[]; const projectsIndex=[];let observed=0;
     const elapsed=()=>{const s=Math.floor((Date.now()-startedAt)/1000);return s>=60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;};
-    const announce=()=>onProgress(`${stage} · ${found.length} found · ${elapsed()} elapsed`);
+    const announce=count=>{if(count!=null)observed=Math.max(observed,count);else observed=Math.max(observed,found.length);onProgress(`${stage} · ${observed} found · ${elapsed()} elapsed`);};
     const heartbeat=setInterval(announce,5000);
     try{
       announce();
@@ -777,9 +777,9 @@
       for(let accountNo=0;accountNo<accounts.length;accountNo++){
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
-        const active=await listRegular(accountId,false); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});
+        const active=await listRegular(accountId,false,count=>announce(found.length+count)); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}scanning archived conversations`;announce();
-        const archived=await listRegular(accountId,true); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});
+        const archived=await listRegular(accountId,true,count=>announce(found.length+count)); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}finding projects`;announce();
         try{
           const projects=await listProjects(accountId);
@@ -787,13 +787,13 @@
             const p=projects[projectNo],pid=p.id||p.gizmo_id||p.project_id;if(!pid)continue;
             const pname=(p.display&&p.display.name)||p.name||p.title||'Project';
             stage=`${accountLabel}scanning project ${projectNo+1}/${projects.length}`;announce();
-            let xs=[];try{xs=await listProjectConversations(p,accountId);}catch(e){setCapability('project_conversations','unavailable',e.message);}
+            let xs=[];try{xs=await listProjectConversations(p,accountId,count=>announce(found.length+count));}catch(e){setCapability('project_conversations','unavailable',e.message);}
             projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
             for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
           }
         }catch(_){}
         stage=`${accountLabel}scanning shared conversations`;announce();
-        for(const sh of await listShared(accountId)) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});
+        for(const sh of await listShared(accountId,count=>announce(found.length+count))) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});announce();
       }
       stage='Removing duplicates and preparing the export';announce();
       const byKey=new Map();
