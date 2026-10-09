@@ -162,6 +162,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.33**
+Current version: **0.6.34**
 
-This version streams conversation pages into the in-page picker as the account scan progresses, so you can browse and select results before the full scan completes. Search, filter by date and location, sort, select individual chats or a Shift-click range, then export or delete the selection. Partial results remain visible if a scan is cancelled, but actions wait until the list is complete. Dates in the picker use consistent English labels. Running scans and exports can be cancelled. Deletion is always a separate, explicit step: optionally export a backup, review it, then confirm deletion; only successfully exported conversations are offered for deletion.
+This version streams conversation pages into the in-page picker as the account scan progresses. You can export or delete selected conversations as soon as they are loaded, while the scan continues fetching the remaining pages. Only one selected action runs at a time; cancelling during one stops both that action and the scan. Search, filters, sorting and range selection remain available. Deletion is always a separate, explicit step: optionally export a backup, review it, then confirm deletion; only successfully exported conversations are offered for deletion.

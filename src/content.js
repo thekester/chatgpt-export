@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.31 - content script
+// ChatGPT Export v0.6.34 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -25,6 +25,8 @@
 
   let sessionCache = null;
   let busy = false;
+  let busyKind = '';
+  let concurrentActionBusy = false;
   let jobCancelled = false;
   let jobAbortController = null;
   let progressState = null;
@@ -34,6 +36,7 @@
   let lastProgressFailureCount = 0;
   let rateLimitUntil = 0;
   let managerListCache = null;
+  const managerDeletedDuringScan = new Set();
   const progressListeners = new Set();
 
   function checkCancelled(){if(jobCancelled){const error=new Error('Export cancelled by user. You can start a new export.');error.name='AbortError';throw error;}}
@@ -1038,12 +1041,18 @@
   }
   function publishPickerItems(rawItems){
     if(!rawItems||!rawItems.length)return;
-    const state={...(progressState||{}),items:rawItems.map(managerSummary)};
+    const byKey=new Map((managerListCache&&managerListCache.items||[]).map(item=>[managerItemKey(item),item]));
+    for(const item of rawItems){const key=managerItemKey(item);if(!managerDeletedDuringScan.has(key))byKey.set(key,{...(byKey.get(key)||{}),...item});}
+    managerListCache={...(managerListCache||{}),complete:false,items:[...byKey.values()]};
+    const state={...(progressState||{}),items:rawItems.filter(item=>!managerDeletedDuringScan.has(managerItemKey(item))).map(managerSummary)};
     for(const listener of progressListeners){try{listener(state);}catch(_){}}
   }
   async function managerList(){
+    managerDeletedDuringScan.clear();
+    managerListCache={items:[],projectsIndex:[],accounts:[],complete:false};
     const listed=await listAll({conversationLimit:0},label=>progressPercent(1,label),publishPickerItems);
-    managerListCache=listed;
+    listed.items=listed.items.filter(item=>!managerDeletedDuringScan.has(managerItemKey(item)));
+    managerListCache={...listed,complete:true};
     progressPercent(100,`${listed.items.length} conversations ready to manage.`,listed.items.length,listed.items.length);
     const items=listed.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt);
     return{items,total:items.length};
@@ -1109,6 +1118,7 @@
     }
     if(managerListCache){
       const removed=new Set(deleteResults.filter(x=>x.ok).map(x=>x.key));
+      for(const key of removed)managerDeletedDuringScan.add(key);
       managerListCache={...managerListCache,items:managerListCache.items.filter(item=>!removed.has(managerItemKey(item)))};
     }
     return{exportResult,exportError,deleteResults};
@@ -1116,9 +1126,14 @@
 
   function runBusyJob(kind,jobFactory){
     if(busy)return Promise.resolve({ok:false,error:'Another export or conversation action is already running in this tab.'});
-    busy=true;jobCancelled=false;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
+    busy=true;busyKind=kind;jobCancelled=false;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
     jobAbortController=new AbortController();
-    return Promise.resolve().then(jobFactory).then(result=>({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,`${kind} cancelled. You can start a new action.`);return{ok:false,cancelled,error:cancelled?'Export cancelled by user. You can start a new export.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})};}).finally(()=>{busy=false;jobAbortController=null;});
+    return Promise.resolve().then(jobFactory).then(result=>({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,`${kind} cancelled. You can start a new action.`);return{ok:false,cancelled,error:cancelled?'Export cancelled by user. You can start a new export.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})};}).finally(()=>{if(concurrentActionBusy){busy=true;busyKind='selected conversation actions';}else{busy=false;busyKind='';jobAbortController=null;}});
+  }
+  function concurrentListAction(actions,options){
+    if(concurrentActionBusy)return Promise.resolve({ok:false,error:'Another conversation action is already running.'});
+    concurrentActionBusy=true;
+    return Promise.resolve().then(()=>managerRun({actions,options})).then(result=>({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,'Scan and selected action cancelled.');return{ok:false,cancelled,error:cancelled?'Scan and selected action cancelled.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})};}).finally(()=>{concurrentActionBusy=false;if(busyKind==='selected conversation actions'){busy=false;busyKind='';jobAbortController=null;}});
   }
   function withBusyJob(sendResponse,kind,jobFactory){
     runBusyJob(kind,jobFactory).then(sendResponse);
@@ -1137,11 +1152,12 @@
   // lives in the extension's isolated world, so the ChatGPT page cannot see it.
   globalThis.CGX_core={
     isBusy:()=>busy,
+    isListing:()=>busy&&busyKind==='conversation list',
     progress:()=>progressState,
-    hasCachedList:()=>!!managerListCache,
+    hasCachedList:()=>!!(managerListCache&&managerListCache.complete),
     cachedItems:()=>managerListCache?managerListCache.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt):null,
     listConversations:()=>runBusyJob('conversation list',managerList),
-    runActions:(actions,options)=>runBusyJob('selected conversation actions',()=>managerRun({actions,options})),
+    runActions:(actions,options)=>busy&&busyKind==='conversation list'?concurrentListAction(actions,options):runBusyJob('selected conversation actions',()=>managerRun({actions,options})),
     cancel:cancelJob,
     onProgress(listener){progressListeners.add(listener);return()=>progressListeners.delete(listener);}
   };

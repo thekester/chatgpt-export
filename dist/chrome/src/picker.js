@@ -102,7 +102,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 @keyframes spin { to { transform: rotate(360deg); } }
 .more { padding: 14px; color: var(--muted); font-size: 12.5px; text-align: center; }
 
-.foot { display: flex; align-items: center; gap: 14px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--bg); }
+.foot { display: flex; flex-wrap: wrap; align-items: center; gap: 14px; padding: 14px 22px; border-top: 1px solid var(--line); background: var(--bg); }
 .foot-left { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: 6px 18px; min-width: 0; }
 .count { font-weight: 650; }
 .count small { color: var(--muted); font-weight: 400; }
@@ -116,6 +116,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 .danger { height: 38px; padding: 0 16px; border: 1px solid var(--danger); border-radius: 8px; background: var(--danger); color: #fff; font-weight: 650; }
 :host([data-theme="dark"]) .danger { color: #1b1f24; }
 .run { display: flex; flex: 1; align-items: center; gap: 14px; min-width: 0; }
+.foot:has(.run:not([hidden])) .run { flex: 1 1 100%; order: -1; }
 .run-text { flex: 1; min-width: 0; }
 .run-label { overflow: hidden; margin-bottom: 6px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
 .bar { position: relative; height: 6px; overflow: hidden; border-radius: 99px; background: var(--line); }
@@ -218,6 +219,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   let host = null, root = null, el = {};
   let items = [], filtered = [], rendered = 0;
   let listComplete = false;
+  let actionBusy = false;
   const selected = new Set();
   let formats = {}, format = "both";
   let phase = "idle"; // idle | loading | running
@@ -374,6 +376,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       renderEmpty("Busy", "An export started from the extension popup is still running.");
       return;
     }
+    if (force) { items = []; filtered = []; rendered = 0; selected.clear(); }
     listComplete = false;
     setPhase("loading");
     el.banner.hidden = true;
@@ -506,7 +509,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   }
 
   function onRowClick(event) {
-    if (phase === "running" || event.target.closest("a")) return;
+    if (phase === "running" || actionBusy || event.target.closest("a")) return;
     const row = event.target.closest(".row");
     if (!row) return;
     const key = row.dataset.key;
@@ -529,7 +532,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       const on = selected.has(row.dataset.key);
       row.classList.toggle("on", on);
       row.firstChild.checked = on;
-      row.firstChild.disabled = phase === "running";
+      row.firstChild.disabled = phase === "running" || actionBusy;
     }
   }
 
@@ -538,12 +541,12 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     const shownSelected = filtered.reduce((n, item) => n + (selected.has(item.key) ? 1 : 0), 0);
     el.all.checked = filtered.length > 0 && shownSelected === filtered.length;
     el.all.indeterminate = shownSelected > 0 && shownSelected < filtered.length;
-    el.all.disabled = !filtered.length || phase === "running";
+    el.all.disabled = !filtered.length || phase === "running" || actionBusy;
     const filteredOut = filtered.length !== items.length && view === "all";
     el.allLabel.textContent = !filtered.length ? "Select all" : `Select all ${fmtNumber(filtered.length)}${filteredOut ? " shown" : ""}`;
     el.selInfo.replaceChildren();
     if (selected.size) {
-      el.selInfo.append(`${fmtNumber(selected.size)} selected · `);
+      el.selInfo.append(`${fmtNumber(selected.size)} selected${!listComplete ? ` · ${fmtNumber(items.length)} loaded; ${phase === "loading" ? "scan continues" : "scan incomplete"}` : ""} · `);
       const clear = document.createElement("button");
       clear.type = "button"; clear.className = "link clear"; clear.textContent = "Clear";
       el.selInfo.appendChild(clear);
@@ -564,22 +567,30 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       small.textContent = ` (${fmtNumber(hidden)} hidden by filters)`;
       el.count.appendChild(small);
     }
-    el.exp.disabled = !n || phase !== "idle" || !listComplete;
-    el.del.disabled = !n || phase !== "idle" || !listComplete;
+    if (n && !listComplete) {
+      const small = document.createElement("small");
+      small.textContent = ` (${fmtNumber(items.length)} loaded; ${phase === "loading" ? "scan continues" : "scan incomplete"})`;
+      el.count.appendChild(small);
+    }
+    el.exp.disabled = !n || phase === "running" || actionBusy || (!listComplete && !items.length);
+    el.del.disabled = !n || phase === "running" || actionBusy || (!listComplete && !items.length);
+    el.format.disabled = actionBusy;
     el.exp.querySelector("span").textContent = n ? `Export ${plural(n, "conversation")}` : "Export";
     el.exp.title = n ? `Download as ${FORMAT_LABELS[format]}` : "Tick at least one conversation first";
   }
 
   function setPhase(next) {
     phase = next;
-    const locked = phase === "running";
+    const locked = phase === "running" || actionBusy;
     for (const node of [el.toolbar, el.selbar]) node.toggleAttribute("inert", locked);
-    el.idle.forEach((node) => { node.hidden = phase !== "idle"; });
+    el.idle.forEach((node) => { node.hidden = phase === "running"; });
     el.run.hidden = !locked;
     if (phase === "loading") el.run.hidden = false;
     el.refresh.disabled = phase !== "idle";
     el.cancel.disabled = false;
     el.cancel.textContent = "Cancel";
+    el.cancel.title = actionBusy && phase === "loading" ? "Cancels both the scan and selected action." : "Cancel the current job.";
+    el.format.disabled = actionBusy;
     if (phase === "running") setProgress(0, "Starting…");
     if (phase === "loading") setProgress(0, "Scanning your ChatGPT history…", true);
     paintSelection();
@@ -610,7 +621,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   function onProgress(state) {
     if (!state) return;
     if (phase === "loading" && Array.isArray(state.items) && state.items.length) receiveItems(state.items);
-    if (phase === "loading") setProgress(state.percent || 0, state.label || "Scanning…", true);
+    if (actionBusy && state.percent !== 1) setProgress(state.percent || 0, state.label || "Working on selected conversations…", false);
+    else if (phase === "loading" && !actionBusy) setProgress(state.percent || 0, state.label || "Scanning…", true);
     if (phase === "running") setProgress(state.percent || 0, state.label || "Working…", !state.percent);
   }
 
@@ -648,7 +660,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 
   function openConfirm(mode, keys, exportInfo = "") {
     const chosen = items.filter((item) => keys.includes(item.key));
-    if (!chosen.length || phase !== "idle") return;
+    if (!chosen.length || phase === "running") return;
     confirmState = { mode, keys: chosen.map((item) => item.key) };
     el.preview.replaceChildren();
     for (const item of chosen.slice(0, 8)) { const li = document.createElement("li"); li.textContent = item.title; el.preview.appendChild(li); }
@@ -686,18 +698,34 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 
   async function runJob(actions) {
     const core = globalThis.CGX_core;
-    if (!actions.length || phase !== "idle" || !listComplete) return null;
-    if (core.isBusy()) { showBanner("Another export is already running in this tab. Wait for it to finish.", "error"); return null; }
+    const scanContinues = phase === "loading" && core.isListing();
+    if (!actions.length || phase === "running" || (!listComplete && !items.length) || actionBusy) return null;
+    if (core.isBusy() && !scanContinues) { showBanner("Another export is already running in this tab. Wait for it to finish.", "error"); return null; }
     el.banner.hidden = true;
-    setPhase("running");
-    el.hide.focus();
+    actionBusy = true;
+    el.cancel.title = scanContinues ? "Cancels both the scan and selected action." : "Cancel the current job.";
+    if (scanContinues) {
+      for (const node of [el.toolbar, el.selbar]) node.toggleAttribute("inert", true);
+      setProgress(1, `Working on the selected conversation(s); scan continues (${fmtNumber(items.length)} loaded)…`, true);
+    } else {
+      setPhase("running");
+      el.hide.focus();
+    }
+    paintSelection();
     const result = await core.runActions(actions, exportOptions());
-    setPhase("idle");
+    actionBusy = false;
+    el.cancel.title = "Cancel the current job.";
+    if (scanContinues && phase === "loading") {
+      for (const node of [el.toolbar, el.selbar]) node.toggleAttribute("inert", false);
+      setProgress(1, `${fmtNumber(items.length)} conversations loaded; scan continues…`, true);
+      paintSelection();
+    } else if (phase === "running") setPhase("idle");
+    else setPhase(phase);
     if (!result.ok) {
       if (result.cancelled) showBanner("Cancelled. Nothing else will be exported or deleted.", "");
       else if (/load the conversation list again/i.test(result.error || "")) showBanner("The conversation list is out of date.", "error", "Refresh list", () => load(true));
       else showBanner(`Something went wrong: ${result.error || "unknown error"}`, "error");
-      finish(result.cancelled ? "Cancelled." : "Something went wrong. Open to see why.");
+      if (!core.isListing()) finish(result.cancelled ? "Cancelled." : "Something went wrong. Open to see why.");
       return null;
     }
     return result;
@@ -727,10 +755,10 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     showBanner(lines.join("\n"), problem ? "error" : "ok", exportedKeys.length ? `Delete these ${fmtNumber(exportedKeys.length)} from ChatGPT…` : "", exportedKeys.length ? offerDelete : null, true);
     if (thenAskToDelete && exportedKeys.length) {
       if (open) offerDelete();
-      else finish("Backup exported. Open to confirm the deletion.");
+      else if (!globalThis.CGX_core.isListing()) finish("Backup exported. Open to confirm the deletion.");
       return;
     }
-    finish(problem ? "Export done, with some problems. Open to see details." : "Export done. Open to see the summary.");
+    if (!globalThis.CGX_core.isListing()) finish(problem ? "Export done, with some problems. Open to see details." : "Export done. Open to see the summary.");
   }
 
   async function runDelete(keys) {
@@ -749,7 +777,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     for (const key of removed) selected.delete(key);
     applyFilters(true);
     showBanner(lines.join("\n"), failed.length ? "error" : "ok");
-    finish(failed.length ? "Deletion done, with some problems. Open to see details." : "Deletion done.");
+    if (!globalThis.CGX_core.isListing()) finish(failed.length ? "Deletion done, with some problems. Open to see details." : "Deletion done.");
   }
 
   function showBanner(text, tone = "", actionLabel = "", action = null, keepOpen = false) {
