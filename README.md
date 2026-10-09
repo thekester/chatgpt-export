@@ -65,6 +65,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Option | Effect |
 | --- | --- |
 | Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation; **Export all history** creates one `.jex` notebook containing one note per accessible conversation. |
+| Choose, export, or delete conversations | Opens a searchable, paginated table. Assign each conversation **Do nothing**, **Export**, **Delete permanently**, or **Export, then delete**. Deletion requires confirmation; combined actions delete only after that conversation exports successfully. |
 | Save images in a separate directory | Downloads images into an `images/` directory inside the export archive and keeps Markdown links to them. |
 | Save attachments and generated files in a separate directory | Preserves documents and generated files in a `files/` directory inside the export archive and keeps Markdown links to them. |
 | Markdown flavor | Choose **Markdown with HTML elements** or **Pure Markdown only**. It controls whether the Markdown file is allowed to contain raw HTML tags, and changes how a user question is rendered (see below). |
@@ -157,6 +158,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.26**
+Current version: **0.6.27**
 
-This version adds a timestamp to history-export filenames so multiple backups on the same day do not share the same suggested filename. Limited exports scan only the requested number of most recently updated active conversations; full history still includes archived, project, and shared conversations. HTTP 429 cooldowns and live detailed failure logs remain supported.
+This version adds a conversation manager for per-conversation export, permanent deletion, or export-then-delete actions. Deletion requires explicit confirmation and combined actions only delete conversations whose export succeeds. History-export filenames include timestamps; limited exports scan only requested recent active conversations, while full history includes archived, project, and shared conversations.

@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const btnCurrent = $("current");
 const btnAll = $("all");
 const btnSelected = $("selected");
+const btnManage = $("manage");
 const btnGrant = $("grant");
 const bar = $("bar");
 const progressWrap = $("progress-wrap");
@@ -258,6 +259,7 @@ function refreshButtons() {
   btnCurrent.disabled = busy || unavailable;
   btnAll.disabled = busy || unavailable;
   btnSelected.disabled = busy || unavailable;
+  btnManage.disabled = busy || unavailable;
 }
 
 function setBusy(b) {
@@ -545,6 +547,11 @@ api.runtime.onMessage.addListener((msg, sender) => {
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: 0 }));
 btnSelected.addEventListener("click", () => run("cgx-export-all", { conversationLimit: Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100))) }));
+btnManage.addEventListener("click", () => {
+  if (!tabId) return;
+  const url = `${api.runtime.getURL("popup/manager.html")}?tabId=${encodeURIComponent(tabId)}`;
+  api.tabs.create({ url, active: true });
+});
 btnLog.addEventListener("click", downloadDiagnosticLog);
 btnFailures.addEventListener("click", downloadFailureLog);
 loadOptions();

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Manage ChatGPT conversations</title>
+  <style>
+    :root { color-scheme: light dark; --bg:#fbfbfa; --panel:#fff; --ink:#1d232b; --muted:#657181; --line:#dfe3e8; --accent:#31588d; --danger:#a3261c; --soft:#f3f5f8; }
+    @media (prefers-color-scheme:dark) { :root { --bg:#171a1e; --panel:#20252b; --ink:#e8ebef; --muted:#a4adba; --line:#353d47; --accent:#91b1df; --danger:#ff8b80; --soft:#292f37; } }
+    * { box-sizing:border-box; }
+    body { margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif; }
+    main { max-width:1200px; margin:0 auto; padding:24px; }
+    h1 { margin:0; font-size:23px; }
+    h2 { margin:0 0 8px; font-size:19px; }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; }
+    .intro,.hint,.muted { color:var(--muted); }
+    .intro { margin:0 0 20px; }
+    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:10px; align-items:center; margin:16px 0 10px; }
+    input,select,button { font:inherit; }
+    input[type=search],select { min-height:38px; padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); }
+    button { padding:9px 13px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); cursor:pointer; }
+    button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:650; }
+    button.danger { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 55%,var(--line)); }
+    button:disabled { opacity:.45; cursor:not-allowed; }
+    .table-wrap { overflow:auto; max-height:calc(100vh - 310px); min-height:220px; border:1px solid var(--line); border-radius:9px; background:var(--panel); }
+    table { width:100%; border-collapse:collapse; }
+    th,td { padding:10px 12px; border-bottom:1px solid var(--line); text-align:left; vertical-align:middle; }
+    th { position:sticky; top:0; z-index:1; background:var(--soft); color:var(--muted); font-size:12px; letter-spacing:.02em; }
+    tbody tr:last-child td { border-bottom:0; }
+    td.title { min-width:320px; font-weight:560; }
+    td.date { min-width:150px; color:var(--muted); white-space:nowrap; font-size:12px; }
+    td.scope { color:var(--muted); font-size:12px; }
+    td select { min-width:185px; width:100%; }
+    .pagination,.runbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
+    .pagination .buttons { display:flex; gap:7px; }
+    .runbar { position:sticky; bottom:0; padding:12px 0; background:var(--bg); }
+    .runbar p { margin:0; color:var(--muted); }
+    #status { min-height:25px; margin:8px 0; color:var(--muted); }
+    #status.error { color:var(--danger); }
+    #progress { width:100%; height:8px; accent-color:var(--accent); }
+    dialog { width:min(560px,calc(100% - 32px)); max-height:80vh; padding:22px; border:1px solid var(--line); border-radius:12px; background:var(--panel); color:var(--ink); box-shadow:0 18px 60px #0005; }
+    dialog::backdrop { background:#0008; }
+    #delete-preview { max-height:180px; overflow:auto; padding-left:22px; color:var(--muted); }
+    .warning { padding:10px 12px; border-left:3px solid var(--danger); background:color-mix(in srgb,var(--danger) 9%,transparent); }
+    .confirm-row { display:flex; align-items:flex-start; gap:9px; margin:16px 0; }
+    .dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
+    @media (max-width:700px) { main{padding:14px}.toolbar{grid-template-columns:1fr 1fr}.toolbar input{grid-column:1/-1}.table-wrap{max-height:60vh}td.title{min-width:220px}.runbar{align-items:flex-start;flex-direction:column} }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="top"><h1>Manage conversations</h1><button id="reload" type="button">Reload list</button></div>
+    <p class="intro">Choose an action for each conversation. Export, permanent deletion, and export-then-delete are independent row actions.</p>
+    <p id="status" role="status">Connecting to the ChatGPT tab…</p>
+    <progress id="progress" max="100" value="0" hidden></progress>
+    <div class="toolbar">
+      <input id="search" type="search" placeholder="Search conversation titles" aria-label="Search conversation titles">
+      <select id="bulk-action" aria-label="Action for checked rows">
+        <option value="">Set action for checked rows…</option>
+        <option value="none">Leave unchanged</option><option value="export">Export</option>
+        <option value="delete">Delete permanently</option><option value="export-delete">Export, then delete</option>
+      </select>
+      <span id="counts" class="muted">No conversations loaded</span>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th><input id="select-visible" type="checkbox" aria-label="Select visible rows"></th><th>Conversation</th><th>Updated</th><th>Location</th><th>Action</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="5" class="muted">Conversation list will appear here.</td></tr></tbody>
+      </table>
+    </div>
+    <div class="pagination"><span id="page-label" class="muted"></span><div class="buttons"><button id="previous" type="button">Previous</button><button id="next" type="button">Next</button></div></div>
+    <div class="runbar"><p id="selection-summary">No actions selected.</p><button id="run-actions" class="primary" type="button" disabled>Run selected actions</button></div>
+  </main>
+  <dialog id="delete-dialog">
+    <h2>Confirm permanent deletion</h2>
+    <p id="delete-summary"></p>
+    <p class="warning"><strong>This removes conversations from your ChatGPT account; it does not archive them. You cannot restore deleted chats.</strong> OpenAI schedules them for permanent deletion within 30 days, subject to its retention exceptions. For “Export, then delete,” only conversations whose export succeeds will be deleted.</p>
+    <ul id="delete-preview"></ul>
+    <label class="confirm-row"><input id="delete-ack" type="checkbox"><span>I understand these conversations will be permanently deleted from ChatGPT.</span></label>
+    <div class="dialog-actions"><button id="cancel-delete" type="button">Cancel</button><button id="confirm-delete" class="danger" type="button" disabled>Confirm and run</button></div>
+  </dialog>
+  <script src="manager.js"></script>
+</body>
+</html>

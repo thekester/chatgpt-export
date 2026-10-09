@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.26 - content script
+// ChatGPT Export v0.6.27 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -31,6 +31,7 @@
   let liveFailureDetails = [];
   let lastProgressFailureCount = 0;
   let rateLimitUntil = 0;
+  let managerListCache = null;
   const capabilityState = {};
   const diagnosticEvents = [];
   const DIAGNOSTIC_LIMIT = 250;
@@ -153,26 +154,27 @@
   async function waitForRateLimit() {
     while(rateLimitUntil>Date.now())await sleep(rateLimitUntil-Date.now());
   }
-  async function authFetch(url, attempt = 0, accountId = null, allowAccountFallback = true) {
+  async function authFetch(url, attempt = 0, accountId = null, allowAccountFallback = true, fetchOptions = {}) {
     await waitForRateLimit();
     const session = await getSession();
     const headers = {Accept:'*/*'};
     if (session.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
     if (accountId) headers['ChatGPT-Account-ID'] = accountId;
-    let res = await pageFetch(url, {credentials:'include', cache:'no-store', headers});
+    const requestOptions={credentials:'include',cache:'no-store',headers,...fetchOptions};
+    let res = await pageFetch(url, requestOptions);
     if (res.status === 429) {
       const serverDelay=retryAfterMs(res);
       const delayMs=serverDelay==null?Math.min(5000*2**attempt,120000):serverDelay;
       rateLimitUntil=Math.max(rateLimitUntil,Date.now()+delayMs);
       diag(attempt<6?'api.retry':'api.retry_exhausted',{status:429,attempt:attempt+1,max_retries:6,delay_ms:delayMs,retry_after:res.headers&&res.headers.get('Retry-After'),url});
-      if(attempt<6)return authFetch(url,attempt+1,accountId,allowAccountFallback);
+      if(attempt<6)return authFetch(url,attempt+1,accountId,allowAccountFallback,fetchOptions);
     }
-    if (res.status === 401 && attempt === 0) { await getSession(true); return authFetch(url, 1, accountId, allowAccountFallback); }
+    if (res.status === 401 && attempt === 0) { await getSession(true); return authFetch(url, 1, accountId, allowAccountFallback, fetchOptions); }
     // On some personal/Business accounts, the explicit account header may be
     // rejected even though the cookie already points to the correct workspace. Retry without it.
     if (accountId && allowAccountFallback && (res.status === 403 || res.status === 404)) {
       const h2 = {...headers}; delete h2['ChatGPT-Account-ID'];
-      const fallback = await pageFetch(url, {credentials:'include', cache:'no-store', headers:h2});
+      const fallback = await pageFetch(url, {...requestOptions,headers:h2});
       if (fallback.ok) { setCapability('account_header_fallback', 'available', 'Request succeeded without ChatGPT-Account-ID.'); return fallback; }
     }
     if (!res.ok) { const e = new Error(`HTTP ${res.status} sur ${url}`); e.status = res.status; diag('api.error',{status:res.status,url}); throw e; }
@@ -859,7 +861,7 @@
   }
 
   async function exportAllJex(opts, listed){
-    const entries=[]; let errors=[], failureDetails=[], exported=0, failed=0;
+    const entries=[]; let errors=[], failureDetails=[], failedIds=[], exported=0, failed=0;
     const notebookId=jexId();
     const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
     const items=limit?listed.items.slice(0,limit):listed.items;
@@ -903,7 +905,7 @@
         }catch(e){
           const detail={conversation_index:i+1,conversation_title:redactDiagnosticText(item.title||'Untitled').slice(0,200),error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
           errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status} — `:''}${detail.message}`);
-          failureDetails.push(detail);liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
+          failureDetails.push(detail);failedIds.push({id,accountId});liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
         if(nextIndex<items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await sleep(delay);}
@@ -919,7 +921,7 @@
       download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
     }
     progressPercent(100,`${items.length}/${items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,items.length,items.length);
-    return{count:exported,failed,parts:1,joplinHistory:true,failureDetails};
+    return{count:exported,failed,failedIds,parts:1,joplinHistory:true,failureDetails};
   }
 
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}
@@ -936,11 +938,11 @@
     download(`chatgpt-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
   }
 
-  async function exportAll(opts){
+  async function exportAll(opts, preparedList=null){
     progressPercent(1,'Searching account history…');
     const last=opts.incremental?await storageGet('cgx-last-full-export'):null;
     const previousIndex=opts.incremental?((await storageGet('cgx-export-index'))||{}):{};
-    const listed=await listAll({...opts,since:null},label=>progressPercent(1,label));
+    const listed=preparedList||await listAll({...opts,since:null},label=>progressPercent(1,label));
     progressPercent(7,`Found ${listed.items.length} conversation${listed.items.length===1?'':'s'}.`);
     if(opts.format==='jex') return exportAllJex(opts,listed);
     const nextIndex={...previousIndex}; const items=[];
@@ -953,7 +955,7 @@
     const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
     if(limit)items.splice(limit);
     if(!items.length)throw new Error(opts.incremental?'No new or modified conversations since the last export.':'No conversations found.');
-    let files=[],index=[],used=new Set(),errors=[];let imageFailures=0,fileFailures=0,totalErrors=0,totalImageFailures=0,totalFileFailures=0,part=1,parts=0,bytes=0;
+    let files=[],index=[],used=new Set(),errors=[],failedIds=[];let imageFailures=0,fileFailures=0,totalErrors=0,totalImageFailures=0,totalFileFailures=0,part=1,parts=0,bytes=0;
     const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
     const flush=async(force=false)=>{if(!files.length&&!force)return;totalErrors+=errors.length;totalImageFailures+=imageFailures;totalFileFailures+=fileFailures;await finalizePart(files,index,{projectsIndex:listed.projectsIndex,errors,imageFailures,fileFailures,accounts:listed.accounts,since:opts.since},opts,part);parts++;part++;files=[];index=[];errors=[];imageFailures=0;fileFailures=0;bytes=0;await sleep(500);};
     for(let i=0;i<items.length;i++){
@@ -980,7 +982,7 @@
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
         index.push({title:r.conv.title||'Untitled',href:`${prefix}${r.mainName}.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
-      }catch(e){diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);}
+      }catch(e){diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);failedIds.push({id,accountId});}
       overall(100,'Done.');
       await sleep(DELAY_MS);
     }
@@ -988,11 +990,87 @@
     progressPercent(100,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
     progressPercent(100,'Export ready.',items.length,items.length);
-    return{count:items.length,failed:totalErrors,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts};
+    return{count:items.length-totalErrors,failed:totalErrors,failedIds,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts};
+  }
+
+  function managerItemKey(item){return JSON.stringify([item._cgxAccountId||'',item.conversation_id||item.id||'']);}
+  function managerSummary(item){
+    const accountId=item._cgxAccountId||null;
+    return{key:managerItemKey(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
+  }
+  async function managerList(){
+    const listed=await listAll({conversationLimit:0},label=>progressPercent(1,label));
+    managerListCache=listed;
+    progressPercent(100,`${listed.items.length} conversations ready to manage.`,listed.items.length,listed.items.length);
+    const items=listed.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt);
+    return{items,total:items.length};
+  }
+  async function deleteConversationPermanently(item){
+    const id=item.conversation_id||item.id;
+    if(!id)throw new Error('Conversation identifier is missing.');
+    const response=await authFetch(`/backend-api/conversation/${encodeURIComponent(id)}`,0,item._cgxAccountId||null,false,{method:'DELETE'});
+    if(!response.ok){const error=new Error(`HTTP ${response.status} while permanently deleting conversation.`);error.status=response.status;throw error;}
+    return true;
+  }
+  function defaultExportOptions(options={}){
+    const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...options};
+    opts.modernEmbeddedMd=opts.format==='jex'||!!opts.modernEmbeddedMd;
+    opts.embeddedMd=!!(opts.embeddedMd||opts.modernEmbeddedMd);
+    if(opts.embeddedMd&&!opts.md)opts.md=true;
+    return opts;
+  }
+  async function managerRun(msg){
+    if(!managerListCache)throw new Error('Load the conversation list again before running actions.');
+    const byKey=new Map(managerListCache.items.map(item=>[managerItemKey(item),item]));
+    const tasks=(Array.isArray(msg.actions)?msg.actions:[]).filter(x=>x&&['export','delete','export-delete'].includes(x.action)).map(x=>({item:byKey.get(x.key),action:x.action})).filter(x=>x.item);
+    if(!tasks.length)throw new Error('No valid conversation actions were selected.');
+    const exportTasks=tasks.filter(x=>x.action==='export'||x.action==='export-delete');
+    const deleteTasks=tasks.filter(x=>x.action==='delete'||x.action==='export-delete');
+    let exportResult=null,exportError=null,failedKeys=new Set();
+    if(exportTasks.length){
+      const ids=new Set(exportTasks.map(x=>managerItemKey(x.item)));
+      const selected={...managerListCache,items:managerListCache.items.filter(item=>ids.has(managerItemKey(item)))};
+      try{
+        exportResult=await exportAll(defaultExportOptions(msg.options||{}),selected);
+        for(const failed of exportResult.failedIds||[]){failedKeys.add(JSON.stringify([failed.accountId||'',failed.id||'']));}
+      }catch(error){exportError=redactDiagnosticText(error.message||error);}
+    }
+    const deleteResults=[];
+    let completedDeletes=0;
+    for(const task of deleteTasks){
+      const key=managerItemKey(task.item);
+      if(task.action==='export-delete'&&(exportError||failedKeys.has(key))){
+        deleteResults.push({key,title:task.item.title||'Untitled',ok:false,skipped:true,error:exportError?'Not deleted because the export did not complete.':'Not deleted because its export failed.'});
+        continue;
+      }
+      try{
+        await deleteConversationPermanently(task.item);
+        deleteResults.push({key,title:task.item.title||'Untitled',ok:true});
+        completedDeletes++;
+      }catch(error){
+        deleteResults.push({key,title:task.item.title||'Untitled',ok:false,error:redactDiagnosticText(error.message||error),status:error.status||null});
+      }
+      progressPercent(5+Math.round(90*deleteResults.length/Math.max(deleteTasks.length,1)),`Permanently deleted ${completedDeletes}/${deleteTasks.length} selected conversations…`,deleteResults.length,deleteTasks.length);
+      await sleep(Math.max(0,Math.min(30000,Number((msg.options&&msg.options.jexDelayMs)??2000)||0)));
+    }
+    if(managerListCache){
+      const removed=new Set(deleteResults.filter(x=>x.ok).map(x=>x.key));
+      managerListCache={...managerListCache,items:managerListCache.items.filter(item=>!removed.has(managerItemKey(item)))};
+    }
+    return{exportResult,exportError,deleteResults};
+  }
+
+  function withBusyJob(sendResponse,kind,jobFactory){
+    if(busy){sendResponse({ok:false,error:'Another export or conversation action is already running in this tab.'});return true;}
+    busy=true;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
+    Promise.resolve().then(jobFactory).then(result=>sendResponse({ok:true,...result})).catch(error=>sendResponse({ok:false,error:redactDiagnosticText(error.message||error),diagnostics:diagnosticSnapshot({error})})).finally(()=>{busy=false;});
+    return true;
   }
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,failures:liveFailureDetails,lastJob:lastExportState}));return true;}
+    if(msg.type==='cgx-manager-list')return withBusyJob(sendResponse,'conversation list',managerList);
+    if(msg.type==='cgx-manager-run')return withBusyJob(sendResponse,'selected conversation actions',()=>managerRun(msg));
     if(msg.type!=='cgx-export-current'&&msg.type!=='cgx-export-all')return false;
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
