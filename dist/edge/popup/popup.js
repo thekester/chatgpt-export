@@ -4,6 +4,7 @@ const btnCurrent = $("current");
 const btnAll = $("all");
 const btnSelected = $("selected");
 const btnManage = $("manage");
+const btnCancel = $("cancel-job");
 const btnGrant = $("grant");
 const bar = $("bar");
 const progressWrap = $("progress-wrap");
@@ -264,8 +265,26 @@ function refreshButtons() {
 
 function setBusy(b) {
   busy = b;
+  btnCancel.hidden = !b;
+  btnCancel.disabled = false;
+  btnCancel.textContent = "Cancel running export";
   refreshButtons();
 }
+
+btnCancel.addEventListener("click", async () => {
+  if (exportTabId == null) return;
+  btnCancel.disabled = true;
+  btnCancel.textContent = "Cancelling…";
+  setStatus("Cancellation requested. Waiting for the current request to finish safely…");
+  try {
+    const result = await api.tabs.sendMessage(exportTabId, { type: "cgx-cancel-job" });
+    if (!result || !result.ok) throw new Error(result?.error || "Could not cancel the running job.");
+  } catch (error) {
+    btnCancel.disabled = false;
+    btnCancel.textContent = "Cancel running export";
+    setStatus(error.message || "Could not cancel the running job.", true);
+  }
+});
 
 // Images outside chatgpt.com (web search, products) require access to all sites.
 async function checkPermission() {
@@ -401,6 +420,11 @@ function showFinishedExport(job) {
     localStorage.setItem(key, "1");
   } catch (_) {}
   setBusy(false);
+  if (job.cancelled) {
+    updateActivity([{ label: "Export cancelled. You can start a new export." }]);
+    setStatus("Export cancelled. Start a new export whenever you’re ready.");
+    return;
+  }
   if (!job.ok) {
     updateActivity([{ label: `Export failed: ${job.error || "Unknown error."}` }]);
     setStatus(`The previous export failed: ${job.error || "Unknown error."}`, true);
@@ -493,6 +517,7 @@ async function run(type, optionOverrides = {}) {
     const r = await send({ type, options: { ...currentOptions(), ...optionOverrides } });
     if (!r.ok) {
       const err = new Error(r.error || "Export failed.");
+      err.cancelled = !!r.cancelled;
       err.remoteDiagnostics = r.diagnostics || null;
       throw err;
     }
@@ -516,6 +541,11 @@ async function run(type, optionOverrides = {}) {
     }
     setStatus(text, hasIssues);
   } catch (e) {
+    if (e.cancelled || e.name === "AbortError") {
+      updateActivity([{ label: "Export cancelled. You can start a new export." }]);
+      setStatus("Export cancelled. Start a new export whenever you’re ready.");
+      return;
+    }
     if (/already running in this tab/i.test(e.message || "")) {
       if (await restoreExportActivity()) { keepBusy = true; pollExportActivity(); return; }
     }

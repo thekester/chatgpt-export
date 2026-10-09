@@ -98,7 +98,7 @@ async function sendToChatGPT(message) {
 
 async function loadConversations() {
   if (running) return;
-  running = true; render(); $("progress").hidden = false; $("progress").value = 0;
+  running = true; $("cancel-job").hidden = false; render(); $("progress").hidden = false; $("progress").value = 0;
   setStatus("Scanning conversations…");
   try {
     const result = await sendToChatGPT({ type: "cgx-manager-list" });
@@ -106,8 +106,11 @@ async function loadConversations() {
     items = result.items || []; selectedRows.clear(); actions.clear(); currentPage = 0;
     setStatus(`${result.total.toLocaleString()} conversations loaded. Choose an action per row.`);
     $("progress").value = 100;
-  } catch (error) { setStatus(error.message || String(error), true); }
-  finally { running = false; render(); }
+  } catch (error) {
+    if (error.cancelled || /cancelled by user/i.test(error.message || "")) setStatus("Scan cancelled. You can start it again whenever you’re ready.");
+    else setStatus(error.message || String(error), true);
+  }
+  finally { running = false; $("cancel-job").hidden = true; render(); }
 }
 
 function makeExportOptions() {
@@ -142,7 +145,7 @@ function reviewActions(action) {
 }
 
 async function runActions(planned) {
-  $("delete-dialog").close(); running = true; render(); $("progress").hidden = false; $("progress").value = 0;
+  $("delete-dialog").close(); running = true; $("cancel-job").hidden = false; render(); $("progress").hidden = false; $("progress").value = 0;
   setStatus("Running selected actions…");
   try {
     const result = await sendToChatGPT({
@@ -150,7 +153,7 @@ async function runActions(planned) {
       actions: planned.map(({ item, action }) => ({ key: item.key, action })),
       options: makeExportOptions()
     });
-    if (!result || !result.ok) throw new Error((result && result.error) || "Selected actions failed.");
+    if (!result || !result.ok) { const error = new Error((result && result.error) || "Selected actions failed."); error.cancelled = !!(result && result.cancelled); throw error; }
     const exportResult = result.exportResult;
     const deleted = (result.deleteResults || []).filter((entry) => entry.ok);
     const deleteFailures = (result.deleteResults || []).filter((entry) => !entry.ok);
@@ -171,11 +174,22 @@ async function runActions(planned) {
       if ((task.action === "delete" || task.action === "export-delete") && deleteResultByKey.get(task.item.key)?.ok) actions.delete(task.item.key);
     }
     $("progress").value = 100;
-  } catch (error) { setStatus(error.message || String(error), true); }
-  finally { running = false; render(); }
+  } catch (error) {
+    if (error.cancelled || /cancelled by user/i.test(error.message || "")) setStatus("Action cancelled. You can start a new action whenever you’re ready.");
+    else setStatus(error.message || String(error), true);
+  }
+  finally { running = false; $("cancel-job").hidden = true; render(); }
 }
 
 $("reload").addEventListener("click", loadConversations);
+$("cancel-job").addEventListener("click", async () => {
+  const button = $("cancel-job"); button.disabled = true; button.textContent = "Cancelling…";
+  try {
+    const result = await sendToChatGPT({ type: "cgx-cancel-job" });
+    if (!result || !result.ok) throw new Error((result && result.error) || "Could not cancel the running action.");
+    setStatus("Cancellation requested. Waiting for the current request to finish safely…");
+  } catch (error) { setStatus(error.message || String(error), true); }
+});
 $("search").addEventListener("input", () => { currentPage = 0; render(); });
 $("sort-by").addEventListener("change", () => { currentPage = 0; render(); });
 $("date-from").addEventListener("change", () => { currentPage = 0; render(); });

@@ -158,6 +158,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.29**
+Current version: **0.6.30**
 
-This version makes conversation selection and bulk actions clearer in the conversation manager. Sort by update date or title and filter by date range to find older chats. It also supports per-conversation export, permanent deletion, or export-then-delete actions. Deletion requires explicit confirmation and combined actions only delete conversations whose export succeeds. History-export filenames include timestamps; limited exports scan only requested recent active conversations, while full history includes archived, project, and shared conversations.
+This version adds cancellation for history scans and exports from the popup or conversation manager. Cancellation waits for the current operation to stop safely; start a new run afterward. It also makes conversation selection and bulk actions clearer, with sorting and date filters for older chats. Permanent deletion requires confirmation, and export-then-delete only deletes conversations whose export succeeds.

@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.27 - content script
+// ChatGPT Export v0.6.30 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -25,6 +25,8 @@
 
   let sessionCache = null;
   let busy = false;
+  let jobCancelled = false;
+  let jobAbortController = null;
   let progressState = null;
   let activityState = [];
   let lastExportState = null;
@@ -32,6 +34,9 @@
   let lastProgressFailureCount = 0;
   let rateLimitUntil = 0;
   let managerListCache = null;
+
+  function checkCancelled(){if(jobCancelled){const error=new Error('Export cancelled by user. You can start a new export.');error.name='AbortError';throw error;}}
+  async function jobSleep(ms){const end=Date.now()+Math.max(0,ms);while(Date.now()<end){checkCancelled();await sleep(Math.min(150, end-Date.now()));}checkCancelled();}
   const capabilityState = {};
   const diagnosticEvents = [];
   const DIAGNOSTIC_LIMIT = 250;
@@ -152,16 +157,20 @@
     return Number.isFinite(date)?Math.max(0,date-Date.now()):null;
   }
   async function waitForRateLimit() {
-    while(rateLimitUntil>Date.now())await sleep(rateLimitUntil-Date.now());
+    while(rateLimitUntil>Date.now()){checkCancelled();await sleep(Math.min(250,rateLimitUntil-Date.now()));}
+    checkCancelled();
   }
   async function authFetch(url, attempt = 0, accountId = null, allowAccountFallback = true, fetchOptions = {}) {
+    checkCancelled();
     await waitForRateLimit();
+    checkCancelled();
     const session = await getSession();
     const headers = {Accept:'*/*'};
     if (session.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
     if (accountId) headers['ChatGPT-Account-ID'] = accountId;
-    const requestOptions={credentials:'include',cache:'no-store',headers,...fetchOptions};
+    const requestOptions={credentials:'include',cache:'no-store',headers,...fetchOptions,signal:jobAbortController?jobAbortController.signal:fetchOptions.signal};
     let res = await pageFetch(url, requestOptions);
+    checkCancelled();
     if (res.status === 429) {
       const serverDelay=retryAfterMs(res);
       const delayMs=serverDelay==null?Math.min(5000*2**attempt,120000):serverDelay;
@@ -183,7 +192,7 @@
   const apiGet = async (path, accountId = null) => (await authFetch(path, 0, accountId)).json();
   async function tryApiGet(path, accountId = null, capability = null) {
     try { const data = await apiGet(path, accountId); if (capability) setCapability(capability, 'available'); return {ok:true,data,status:200}; }
-    catch (e) { if (capability) setCapability(capability, 'unavailable', e.message); return {ok:false,data:null,status:e.status||0,error:e}; }
+    catch (e) { checkCancelled(); if (capability) setCapability(capability, 'unavailable', e.message); return {ok:false,data:null,status:e.status||0,error:e}; }
   }
 
   function b64ToBytes(b64) {
@@ -201,6 +210,7 @@
     ];
     let last = null;
     for (const path of variants) {
+      checkCancelled();
       const r = await tryApiGet(path, accountId, 'file_asset_download');
       if (!r.ok) { last = r.error; continue; }
       const u = r.data && (r.data.download_url || r.data.url || r.data.signed_url);
@@ -236,7 +246,7 @@
         if (!bytes.length) throw new Error('Fichier sandbox vide');
         setCapability('sandbox_download', 'available', path.split('?')[0]);
         return {type, bytes};
-      } catch (e) { last = e; }
+      } catch (e) { checkCancelled(); last = e; }
     }
     setCapability('sandbox_download', 'unavailable', last && last.message);
     throw last || new Error('Sandbox download unavailable');
@@ -344,6 +354,7 @@
   async function collectImages(ctx, convId, enabled, prefix, accountId, onProgress=null) {
     const map=new Map(), files=[]; let failed=0;
     for (let i=0;i<ctx.images.length;i++) {
+      checkCancelled();
       const img=ctx.images[i]; let target=null;
       if (enabled) for (const cand of img.candidates) try {
         const url=cand.startsWith('asset:') ? await resolveAsset(cand.slice(6),convId,accountId) : cand;
@@ -352,7 +363,7 @@
         const ext=extensionFor(type,url);
         const name=`images/img-${String(i+1).padStart(3,'0')}.${ext}`;
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); target=name; break;
-      } catch(_) {}
+      } catch(e) { checkCancelled(); }
       if (!target) {
         target=img.candidates.find(c=>!c.startsWith('asset:') && CGX.isArchiveSafeUrl(c)) || '#image-non-recuperee';
         if(enabled) failed++;
@@ -366,6 +377,7 @@
   async function collectFiles(ctx, convId, enabled, prefix, accountId, onProgress=null) {
     const map=new Map(), files=[]; let failed=0;
     for (let i=0;i<ctx.files.length;i++) {
+      checkCancelled();
       const f=ctx.files[i]; let target=null;
       if (enabled) for (const cand of f.candidates) try {
         let type, bytes, url = cand;
@@ -379,7 +391,7 @@
         if (!/\.[A-Za-z0-9]{1,8}$/.test(name)) name += '.' + extensionFor(type,url,name);
         name=`files/${String(i+1).padStart(3,'0')}-${name}`;
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); target=name; break;
-      } catch(_) {}
+      } catch(e) { checkCancelled(); }
       if (!target) {
         target=f.candidates.find(c=>/^https?:/.test(c) && CGX.isArchiveSafeUrl(c)) || f.candidates.find(c=>c.startsWith('sandbox:')) || '#file-not-downloaded';
         if(enabled) failed++;
@@ -407,12 +419,13 @@
     }
     const repl=new Map(), files=[]; let failed=0, n=0;
     for (const url of urls) {
+      checkCancelled();
       try {
         const {type,bytes}=await fetchBytes(url, accountId);
         const ext=extensionFor(type,url);
         const name=`images/embedded-${String(++n).padStart(3,'0')}.${ext}`;
         files.push({name:prefix+name,content:bytes,mime:mimeFor(type,url,name)}); repl.set(url,name);
-      } catch(_) { failed++; }
+      } catch(e) { checkCancelled(); failed++; }
       if(onProgress) onProgress(repl.size+failed,urls.size);
     }
     return {documents:documents.map(d=>({...d,content:[...repl].reduce((s,[a,b])=>s.split(a).join(b),d.content)})),files,failed};
@@ -439,10 +452,12 @@
   }
 
   async function exportConversation(convId, opts, prefix, source={}, convOverride=null, onProgress=null) {
+    checkCancelled();
     const report=(percent,label)=>{if(onProgress)onProgress(percent,label);};
     const accountId=source.accountId||null;
     report(3,'Reading conversation…');
     let conv=convOverride || await apiGet(`/backend-api/conversation/${convId}`, accountId);
+    checkCancelled();
     if (conv && conv.conversation) conv=conv.conversation;
     conv.conversation_id=conv.conversation_id||conv.id||convId;
     report(10,'Preparing messages…');
@@ -477,6 +492,7 @@
     if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${mainName}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown(conv,currentTurns,opts),allMap))});
     if(opts.html) docs.push({name:`${prefix}${mainName}.html`,content:fill(CGX.toHtml(conv,currentTurns),allMap)});
     for (const b of branchData) {
+      checkCancelled();
       const stem=`branches/branch-${String(b.n).padStart(3,'0')}-${String(b.nodeId).slice(0,8)}`;
       if(opts.md||opts.embeddedMd) docs.push({name:`${prefix}${stem}.md`,content:CGX.sanitizeMarkdownLinks(fill(CGX.toMarkdown({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns,opts),allMap))});
       if(opts.html) docs.push({name:`${prefix}${stem}.html`,content:fill(CGX.toHtml({...conv,title:`${conv.title||'Untitled'} - branch ${b.n}`},b.turns),allMap)});
@@ -501,10 +517,12 @@
     if(opts.json) files.push({name:`${prefix}${prefix?'raw':base}.json`,content:JSON.stringify(conv,null,2)});
     files.push({name:`${prefix}${prefix?'metadata':base+'.metadata'}.json`,content:JSON.stringify(conversationMetadata(conv,currentTurns,source,leaves.length||1,opts),null,2)});
     report(94,'Conversation prepared.');
+    checkCancelled();
     return {conv,base,mainName,files,imageFailures:imgs.failed+localized.failed,fileFailures:atts.failed, turns:currentTurns, branchCount:leaves.length||1};
   }
 
   function download(filename,blob){
+    checkCancelled();
     const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
   }
 
@@ -702,6 +720,7 @@
       } else r=await exportConversation(target.id,opts,'',{accountId},null,(p,label)=>progressPercent(5+p*0.9,label));
       setCapability('conversation_api','available');
     } catch (e) {
+      checkCancelled();
       diag('conversation-api.fallback',{error:e});
       setCapability('conversation_api','unavailable',e.message);
       const conv=conversationFromDom(target.id);
@@ -732,6 +751,7 @@
     }
     if (opts.modernEmbeddedMd) {
       progressPercent(97,'Building JEX archive…');
+      checkCancelled();
       download(`${r.base}.jex`, buildJex(r.conv, r.files));
       progressPercent(100,'Export ready.');
       return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1,joplin:true};
@@ -740,6 +760,7 @@
     r.files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(r.files,{schema_version:4,exported_at:new Date().toISOString(),conversation_count:1,embedded_markdown:!!opts.embeddedMd,capabilities:capabilitySnapshot()},opts.checksums,(done,total)=>progressPercent(96+2*done/Math.max(total,1),`Building manifest (${done}/${total})…`));
     progressPercent(99,'Building ZIP archive…');
+    checkCancelled();
     download(`${r.base}.zip`,CGX_buildZip(r.files));
     progressPercent(100,'Export ready.');
     return{count:1,failed:0,imageFailures:r.imageFailures,fileFailures:r.fileFailures,parts:1};
@@ -747,7 +768,7 @@
 
   async function pagedOffset(pathBuilder, accountId,onPage=()=>{},maxItems=Infinity){
     const out=[];let offset=0,total=Infinity;
-    while(offset<total&&out.length<maxItems){const page=await apiGet(pathBuilder(offset),accountId);const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch.slice(0,Math.max(0,maxItems-out.length)));total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(out.length>=maxItems||batch.length<PAGE_SIZE&&total===Infinity)break;await sleep(DELAY_MS);}return out;
+    while(offset<total&&out.length<maxItems){checkCancelled();const page=await apiGet(pathBuilder(offset),accountId);checkCancelled();const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch.slice(0,Math.max(0,maxItems-out.length)));total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(out.length>=maxItems||batch.length<PAGE_SIZE&&total===Infinity)break;await jobSleep(DELAY_MS);}return out;
   }
 
   async function listProjects(accountId){
@@ -760,11 +781,12 @@
       return qs;
     };
     do {
+      checkCancelled();
       let data=null;
       for (const path of variants(first?null:cursor)) { const r=await tryApiGet(path,accountId,'projects_list'); if(r.ok){data=r.data;break;} }
       if(!data) break; first=false;
       for(const it of data.items||data.gizmos||data.projects||[]){const g=(it&&it.gizmo&&it.gizmo.gizmo)||(it&&it.gizmo)||it;if(!g)continue;const id=g.id||g.gizmo_id||g.project_id;if(id&&!seen.has(id)){seen.add(id);projects.push({...g,_cgxSidebarItem:it});}}
-      cursor=data.cursor||data.next_cursor||null; if(cursor)await sleep(DELAY_MS);
+      cursor=data.cursor||data.next_cursor||null; if(cursor)await jobSleep(DELAY_MS);
     } while(cursor);
     if(!projects.length && !capabilityState.projects_list) setCapability('projects_list','unavailable','No Projects endpoint available or no Project exists in this workspace.');
     return projects;
@@ -775,8 +797,9 @@
     const preview=(project && project._cgxSidebarItem && (project._cgxSidebarItem.conversations||project._cgxSidebarItem.items)) || project.conversations || [];
     const out=[...preview]; let cursor='0'; let fetched=false;onCount(out.length);
     while(cursor!=null){
+      checkCancelled();
       const r=await tryApiGet(`/backend-api/gizmos/${encodeURIComponent(projectId)}/conversations?cursor=${encodeURIComponent(cursor)}`,accountId,'project_conversations');
-      if(!r.ok) break; fetched=true; const data=r.data; out.push(...(data.items||data.conversations||[]));onCount(out.length); cursor=data.cursor||data.next_cursor||null;if(cursor)await sleep(DELAY_MS);
+      if(!r.ok) break; fetched=true; const data=r.data; out.push(...(data.items||data.conversations||[]));onCount(out.length); cursor=data.cursor||data.next_cursor||null;if(cursor)await jobSleep(DELAY_MS);
     }
     const seen=new Map(); for(const x of out){const id=x&& (x.conversation_id||x.id);if(id)seen.set(id,x);} 
     if(!fetched && preview.length) setCapability('project_conversations','fallback','Using previews available in the Projects sidebar.');
@@ -786,6 +809,7 @@
   async function listShared(accountId,onCount=()=>{}){
     try{const xs=await pagedOffset(o=>`/backend-api/shared_conversations?offset=${o}&limit=${PAGE_SIZE}&order=created`,accountId,n=>onCount(n));setCapability('shared_list','available');return xs;}
     catch(e){
+      checkCancelled();
       const r=await tryApiGet('/backend-api/shared_conversations?order=created',accountId,'shared_list');
       if(r.ok){const xs=r.data.items||r.data.conversations||[];onCount(xs.length);return xs;}
       return[];
@@ -797,6 +821,7 @@
       const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,n=>onCount(n),maxItems);
       setCapability(archived?'archived_list':'conversation_list','available'); return xs;
     } catch(e) {
+      checkCancelled();
       if(!archived){
         try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,n=>onCount(n),maxItems); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
       } else setCapability('archived_list','unavailable',e.message);
@@ -818,6 +843,7 @@
       const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
       if(limit){
         for(let accountNo=0;accountNo<accounts.length;accountNo++){
+          checkCancelled();
           const accountId=accounts[accountNo],accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
           stage=`${accountLabel}scanning recent active conversations (up to ${limit})`;announce();
           const active=await listRegular(accountId,false,count=>announce(found.length+count),limit);
@@ -830,6 +856,7 @@
         return{items,projectsIndex,accounts};
       }
       for(let accountNo=0;accountNo<accounts.length;accountNo++){
+        checkCancelled();
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
         const active=await listRegular(accountId,false,count=>announce(found.length+count)); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
@@ -842,15 +869,16 @@
             const p=projects[projectNo],pid=p.id||p.gizmo_id||p.project_id;if(!pid)continue;
             const pname=(p.display&&p.display.name)||p.name||p.title||'Project';
             stage=`${accountLabel}scanning project ${projectNo+1}/${projects.length}`;announce();
-            let xs=[];try{xs=await listProjectConversations(p,accountId,count=>announce(found.length+count));}catch(e){setCapability('project_conversations','unavailable',e.message);}
+            let xs=[];try{xs=await listProjectConversations(p,accountId,count=>announce(found.length+count));}catch(e){checkCancelled();setCapability('project_conversations','unavailable',e.message);}
             projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
             for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
           }
-        }catch(_){}
+        }catch(e){checkCancelled();}
         stage=`${accountLabel}scanning shared conversations`;announce();
         for(const sh of await listShared(accountId,count=>announce(found.length+count))) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});announce();
       }
       stage='Removing duplicates and preparing the export';announce();
+      checkCancelled();
       const byKey=new Map();
       for(const x of found){const id=x.conversation_id||x.id;if(!id)continue;const key=`${x._cgxAccountId||'personal'}:${id}`;const prev=byKey.get(key);if(prev){byKey.set(key,{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)});}else byKey.set(key,x);}
       let items=[...byKey.values()];
@@ -889,6 +917,7 @@
     };
     const worker=async()=>{
       while(true){
+        checkCancelled();
         const i=nextIndex++;
         if(i>=items.length)return;
         const item=items[i], id=item.conversation_id||item.id, accountId=item._cgxAccountId||null;
@@ -896,26 +925,27 @@
         try{
           let convOverride=null;
           if(item._cgxShared && !item.mapping && item._cgxShareId){
-            try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){}
+            try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(e){checkCancelled();}
           }
           const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
           const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
-          entries.push(...buildJexEntries(r.conv,r.files,notebookId));
+          checkCancelled();entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
         }catch(e){
+          checkCancelled();
           const detail={conversation_index:i+1,conversation_title:redactDiagnosticText(item.title||'Untitled').slice(0,200),error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
           errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status} — `:''}${detail.message}`);
           failureDetails.push(detail);failedIds.push({id,accountId});liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
-        if(nextIndex<items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await sleep(delay);}
+        if(nextIndex<items.length){const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));await jobSleep(delay);}
       }
     };
     await Promise.all(Array.from({length:Math.min(concurrency,listed.items.length)},()=>worker()));
-    if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
+    checkCancelled();if(!exported) throw new Error(errors.length?'No conversations could be exported as JEX.':'No conversations found.');
     entries.unshift(jexNotebookEntry(notebookId,'ChatGPT conversations',exported));
     progressPercent(98,`Building one JEX notebook with ${exported} conversation notes…`,items.length,items.length);
-    download(`chatgpt-joplin-export_${stamp}.jex`,CGX_buildTar(entries));
+    checkCancelled();download(`chatgpt-joplin-export_${stamp}.jex`,CGX_buildTar(entries));
     if(errors.length){
       download(`chatgpt-joplin-export_${stamp}_errors.txt`,new Blob([errors.join('\n')+'\n'],{type:'text/plain;charset=utf-8'}));
       download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
@@ -928,6 +958,7 @@
   async function storageSet(obj){try{await api.storage.local.set(obj);}catch(_){} }
 
   async function finalizePart(files,index,meta,opts,partNo){
+    checkCancelled();
     if(opts.html&&index.length)files.push({name:'index.html',content:CGX.indexHtml(index)});
     if(meta.projectsIndex&&meta.projectsIndex.length)files.push({name:'projects/project-index.json',content:JSON.stringify(meta.projectsIndex,null,2)});
     if(meta.errors&&meta.errors.length)files.push({name:'_erreurs.txt',content:meta.errors.join('\n')+'\n'});
@@ -935,7 +966,8 @@
     files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(files,{schema_version:4,exported_at:new Date().toISOString(),embedded_markdown:!!opts.embeddedMd,conversation_count:index.length,failures:(meta.errors||[]).length,image_failures:meta.imageFailures||0,file_failures:meta.fileFailures||0,workspace_ids:meta.accounts||[],part:partNo,incremental_since:meta.since||null,capabilities:capabilitySnapshot()},opts.checksums);
     const stamp=exportFileStamp();const suffix=partNo>1?`_part-${String(partNo).padStart(3,'0')}`:'';
-    download(`chatgpt-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
+    checkCancelled();
+    checkCancelled();download(`chatgpt-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
   }
 
   async function exportAll(opts, preparedList=null){
@@ -947,6 +979,7 @@
     if(opts.format==='jex') return exportAllJex(opts,listed);
     const nextIndex={...previousIndex}; const items=[];
     for (const item of listed.items) {
+      checkCancelled();
       const id=item.conversation_id||item.id; const key=`${item._cgxAccountId||'personal'}:${id}`;
       const fingerprint=await sha256Hex(JSON.stringify([item.update_time||item.create_time||null,item.title||'',!!item._cgxArchived,item._cgxProjectId||null,item._cgxShareId||null]));
       item._cgxFingerprint=fingerprint; item._cgxIndexKey=key;
@@ -957,8 +990,9 @@
     if(!items.length)throw new Error(opts.incremental?'No new or modified conversations since the last export.':'No conversations found.');
     let files=[],index=[],used=new Set(),errors=[],failedIds=[];let imageFailures=0,fileFailures=0,totalErrors=0,totalImageFailures=0,totalFileFailures=0,part=1,parts=0,bytes=0;
     const maxBytes=Math.max(100,Number(opts.partSizeMB)||1024)*1024*1024;
-    const flush=async(force=false)=>{if(!files.length&&!force)return;totalErrors+=errors.length;totalImageFailures+=imageFailures;totalFileFailures+=fileFailures;await finalizePart(files,index,{projectsIndex:listed.projectsIndex,errors,imageFailures,fileFailures,accounts:listed.accounts,since:opts.since},opts,part);parts++;part++;files=[];index=[];errors=[];imageFailures=0;fileFailures=0;bytes=0;await sleep(500);};
+    const flush=async(force=false)=>{if(!files.length&&!force)return;checkCancelled();totalErrors+=errors.length;totalImageFailures+=imageFailures;totalFileFailures+=fileFailures;await finalizePart(files,index,{projectsIndex:listed.projectsIndex,errors,imageFailures,fileFailures,accounts:listed.accounts,since:opts.since},opts,part);parts++;part++;files=[];index=[];errors=[];imageFailures=0;fileFailures=0;bytes=0;await jobSleep(500);};
     for(let i=0;i<items.length;i++){
+      checkCancelled();
       const item=items[i],id=item.conversation_id||item.id,accountId=item._cgxAccountId||null;
       const overall=(sub,label='')=>{
         // Keep the displayed percentage aligned with the conversation count:
@@ -975,17 +1009,18 @@
         if(listed.accounts.filter(Boolean).length>1)root=`workspaces/${cleanFilename(accountId||'personal')}/${root}`;
         let folder=CGX.safeName(item);const key=`${root}${folder}`;if(used.has(key))folder+=`_${String(id).slice(0,8)}`;used.add(`${root}${folder}`);const prefix=`${root}${folder}/`;
         let convOverride=null;
-        if(item._cgxShared && !item.mapping && item._cgxShareId){try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(_){} }
+        if(item._cgxShared && !item.mapping && item._cgxShareId){try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(e){checkCancelled();} }
         const r=await exportConversation(id,opts,prefix,{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride,(p,label)=>overall(p,label));
         const rBytes=r.files.reduce((n,f)=>n+sizeOf(f),0);
         if(files.length&&bytes+rBytes>maxBytes)await flush();
         files.push(...r.files);bytes+=rBytes;imageFailures+=r.imageFailures;fileFailures+=r.fileFailures;
         index.push({title:r.conv.title||'Untitled',href:`${prefix}${r.mainName}.${opts.html?'html':'md'}`,date:CGX.formatDate(r.conv.update_time),project:item._cgxProjectTitle||'',archived:!!item._cgxArchived,shared:!!item._cgxShared,messages:r.turns.length,size:formatBytes(rBytes),search:plainSearch(r.turns)});
         nextIndex[item._cgxIndexKey]={fingerprint:item._cgxFingerprint,updated_at:item.update_time||item.create_time||null,exported_at:new Date().toISOString()};
-      }catch(e){diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);failedIds.push({id,accountId});}
+      }catch(e){checkCancelled();diag('conversation.error',{index:i+1,error:e});errors.push(`${item.title||id} : ${e.message}`);failedIds.push({id,accountId});}
       overall(100,'Done.');
-      await sleep(DELAY_MS);
+      await jobSleep(DELAY_MS);
     }
+    checkCancelled();
     progressPercent(100,'Finalizing archive…',items.length,items.length);await flush(true);
     progressPercent(100,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
@@ -1033,11 +1068,12 @@
       try{
         exportResult=await exportAll(defaultExportOptions(msg.options||{}),selected);
         for(const failed of exportResult.failedIds||[]){failedKeys.add(JSON.stringify([failed.accountId||'',failed.id||'']));}
-      }catch(error){exportError=redactDiagnosticText(error.message||error);}
+    }catch(error){checkCancelled();exportError=redactDiagnosticText(error.message||error);}
     }
     const deleteResults=[];
     let completedDeletes=0;
     for(const task of deleteTasks){
+      checkCancelled();
       const key=managerItemKey(task.item);
       if(task.action==='export-delete'&&(exportError||failedKeys.has(key))){
         deleteResults.push({key,title:task.item.title||'Untitled',ok:false,skipped:true,error:exportError?'Not deleted because the export did not complete.':'Not deleted because its export failed.'});
@@ -1048,6 +1084,7 @@
         deleteResults.push({key,title:task.item.title||'Untitled',ok:true});
         completedDeletes++;
       }catch(error){
+        checkCancelled();
         deleteResults.push({key,title:task.item.title||'Untitled',ok:false,error:redactDiagnosticText(error.message||error),status:error.status||null});
       }
       progressPercent(5+Math.round(90*deleteResults.length/Math.max(deleteTasks.length,1)),`Permanently deleted ${completedDeletes}/${deleteTasks.length} selected conversations…`,deleteResults.length,deleteTasks.length);
@@ -1062,12 +1099,21 @@
 
   function withBusyJob(sendResponse,kind,jobFactory){
     if(busy){sendResponse({ok:false,error:'Another export or conversation action is already running in this tab.'});return true;}
-    busy=true;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
-    Promise.resolve().then(jobFactory).then(result=>sendResponse({ok:true,...result})).catch(error=>sendResponse({ok:false,error:redactDiagnosticText(error.message||error),diagnostics:diagnosticSnapshot({error})})).finally(()=>{busy=false;});
+    busy=true;jobCancelled=false;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
+    jobAbortController=new AbortController();
+    Promise.resolve().then(jobFactory).then(result=>sendResponse({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,`${kind} cancelled. You can start a new action.`);sendResponse({ok:false,cancelled,error:cancelled?'Export cancelled by user. You can start a new export.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})});}).finally(()=>{busy=false;jobAbortController=null;});
     return true;
   }
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
+    if(msg.type==='cgx-cancel-job'){
+      if(!busy){sendResponse({ok:false,error:'No running job to cancel.'});return false;}
+      jobCancelled=true;
+      if(jobAbortController)jobAbortController.abort();
+      if(progressState)progressState={...progressState,label:'Cancellation requested; finishing the current request safely…',updatedAt:Date.now()};
+      progressPercent(progressState?progressState.percent:0,'Cancellation requested; finishing the current request safely…');
+      sendResponse({ok:true});return false;
+    }
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,failures:liveFailureDetails,lastJob:lastExportState}));return true;}
     if(msg.type==='cgx-manager-list')return withBusyJob(sendResponse,'conversation list',managerList);
     if(msg.type==='cgx-manager-run')return withBusyJob(sendResponse,'selected conversation actions',()=>managerRun(msg));
@@ -1079,7 +1125,7 @@
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
-    busy=true;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
+    busy=true;jobCancelled=false;jobAbortController=new AbortController();activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
     const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
     job.then(r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
@@ -1088,8 +1134,10 @@
       sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
     }).catch(e=>{
       diag('export.failure',{error:e});
-      lastExportState={finishedAt:Date.now(),ok:false,error:redactDiagnosticText(e.message||e)};
-      sendResponse({ok:false,error:redactDiagnosticText(e.message||e),diagnostics:diagnosticSnapshot({error:e})});
-    }).finally(()=>{busy=false;});return true;
+      const cancelled=e.name==='AbortError';
+      lastExportState={finishedAt:Date.now(),ok:false,cancelled,error:redactDiagnosticText(e.message||e)};
+      if(cancelled)progressPercent(progressState?progressState.percent:0,'Export cancelled. You can start a new export.');
+      sendResponse({ok:false,cancelled,error:redactDiagnosticText(e.message||e),diagnostics:cancelled?null:diagnosticSnapshot({error:e})});
+    }).finally(()=>{busy=false;jobAbortController=null;});return true;
   });
 })();

@@ -35,6 +35,7 @@
     td select { min-width:185px; width:100%; }
     .pagination,.runbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
     .pagination .buttons { display:flex; gap:7px; }
+    .top .buttons { display:flex; gap:8px; }
     .runbar .buttons { display:flex; gap:8px; flex-wrap:wrap; }
     .runbar { position:sticky; bottom:0; padding:12px 0; background:var(--bg); }
     .runbar p { margin:0; color:var(--muted); }
@@ -53,7 +54,7 @@
 </head>
 <body>
   <main>
-    <div class="top"><h1>Manage conversations</h1><button id="reload" type="button">Reload list</button></div>
+    <div class="top"><h1>Manage conversations</h1><div class="buttons"><button id="cancel-job" class="danger" type="button" hidden>Cancel scan/action</button><button id="reload" type="button">Reload list</button></div></div>
     <p class="intro">Select conversations with the checkboxes, then choose an action below. You can select all conversations on the current page at once.</p>
     <p id="status" role="status">Connecting to the ChatGPT tab…</p>
     <progress id="progress" max="100" value="0" hidden></progress>

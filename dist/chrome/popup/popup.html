@@ -48,6 +48,7 @@
     }
     #current { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); }
     #all { background: transparent; color: var(--ink); border: 1px solid var(--line); }
+    #cancel-job { background: transparent; color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); }
     #download-log, #download-failures { background: transparent; color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); font-size: 12.5px; }
     button:disabled { opacity: .45; cursor: default; }
     button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
@@ -131,6 +132,7 @@
   <p class="field-hint">Limited export selects the most recently updated active conversations. Full history also includes archived, project, and shared conversations.</p>
   <button id="selected" type="button">Export selected conversations</button>
   <button id="manage" type="button">Choose, export, or delete conversations…</button>
+  <button id="cancel-job" type="button" hidden>Cancel running export</button>
   <div id="progress-wrap" hidden><progress id="bar" value="0" max="100"></progress><span id="progress-percent">0%</span></div>
   <section id="activity-wrap" aria-live="polite" hidden><h2 id="activity-title">Export activity</h2><ol id="activity-list"></ol></section>
   <p id="status" role="status"></p>
