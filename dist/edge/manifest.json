@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ChatGPT Markdown Export",
-  "version": "0.6.30",
+  "version": "0.6.31",
   "description": "Export and archive ChatGPT conversations as Markdown, HTML, JEX, or ZIP with images, files, sources, branches, and self-contained Markdown.",
   "homepage_url": "https://github.com/thekester/chatgpt-export",
   "icons": {
@@ -40,7 +40,8 @@
         "lib/marked.umd.js",
         "src/zip.js",
         "src/render.js",
-        "src/content.js"
+        "src/content.js",
+        "src/picker.js"
       ],
       "run_at": "document_idle"
     }

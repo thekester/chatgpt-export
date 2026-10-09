@@ -1,143 +1,193 @@
 <!doctype html>
-<html lang="fr">
+<html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>Export conversation</title>
+  <title>ChatGPT Export</title>
   <style>
     :root {
       --bg: #fbfbfa;
+      --panel: #ffffff;
       --ink: #1d232b;
       --muted: #5b6573;
       --line: #dfe3e8;
       --accent: #2b4c7e;
       --accent-ink: #ffffff;
+      --accent-soft: rgba(43, 76, 126, .08);
       --error: #a3261c;
     }
     @media (prefers-color-scheme: dark) {
       :root {
         --bg: #1b1f24;
+        --panel: #22272e;
         --ink: #e8ebef;
         --muted: #9aa4b1;
         --line: #333a43;
         --accent: #8fb0e0;
         --accent-ink: #13171c;
+        --accent-soft: rgba(143, 176, 224, .12);
         --error: #f08a80;
       }
     }
     * { box-sizing: border-box; }
     body {
       margin: 0;
-      width: 300px;
-      padding: 16px;
+      width: 340px;
+      padding: 14px 16px 12px;
       background: var(--bg);
       color: var(--ink);
       font: 14px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
     }
-    h1 { font-size: 15px; font-weight: 650; margin: 0 0 4px; }
-    p.lead { margin: 0 0 14px; color: var(--muted); font-size: 13px; }
-    button {
-      display: block;
-      width: 100%;
-      padding: 9px 12px;
-      margin-bottom: 8px;
-      border-radius: 6px;
-      font: inherit;
-      font-weight: 550;
-      text-align: left;
-      cursor: pointer;
-    }
-    #current { background: var(--accent); color: var(--accent-ink); border: 1px solid var(--accent); }
-    #all { background: transparent; color: var(--ink); border: 1px solid var(--line); }
-    #cancel-job { background: transparent; color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); }
-    #download-log, #download-failures { background: transparent; color: var(--error); border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); font-size: 12.5px; }
-    button:disabled { opacity: .45; cursor: default; }
-    button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-    #progress-wrap { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-    #progress-wrap progress { flex: 1; width: auto; height: 7px; margin: 0; accent-color: var(--accent); }
-    #progress-percent { min-width: 38px; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
-    #activity-wrap { margin-top: 10px; padding: 9px 10px; border: 1px solid var(--line); border-radius: 6px; background: color-mix(in srgb, var(--accent) 4%, transparent); }
-    #activity-title { margin: 0 0 5px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
-    #activity-list { display: grid; gap: 5px; max-height: 112px; overflow-y: auto; margin: 0; padding: 0; list-style: none; }
-    #activity-list li { position: relative; padding-left: 13px; color: var(--muted); font-size: 11.5px; line-height: 1.35; overflow-wrap: anywhere; }
-    #activity-list li::before { position: absolute; left: 1px; top: .45em; width: 6px; height: 6px; border-radius: 50%; background: var(--line); content: ""; }
-    #activity-list li:last-child { color: var(--ink); }
-    #activity-list li:last-child::before { background: var(--accent); }
-    #status { min-height: 1.45em; margin: 8px 0 0; font-size: 13px; color: var(--muted); }
-    #status.error { color: var(--error); }
-    fieldset { border: 0; padding: 0; margin: 0 0 14px; display: grid; gap: 6px; }
-    .formats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-    .formats label { justify-content: center; padding: 7px 4px; gap: 0; border-left: 1px solid var(--line); }
+    [hidden] { display: none !important; }
+    button, input, select { font: inherit; color: inherit; }
+    :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+    header img { width: 28px; height: 28px; }
+    h1 { margin: 0; font-size: 15px; font-weight: 650; }
+    #tab-hint { margin: 0; color: var(--muted); font-size: 12px; }
+    #tab-hint.error { color: var(--error); }
+
+    h2 { margin: 0 0 6px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+    section.step { margin-bottom: 14px; }
+    .hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+
+    .formats { display: grid; grid-template-columns: repeat(4, 1fr); margin: 0; padding: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .formats label { display: flex; justify-content: center; padding: 7px 2px; border-left: 1px solid var(--line); font-size: 13px; cursor: pointer; }
     .formats label:first-child { border-left: 0; }
     .formats input { position: absolute; opacity: 0; pointer-events: none; }
     .formats label:has(input:checked) { background: var(--accent); color: var(--accent-ink); font-weight: 600; }
     .formats label:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
-    .media-mode { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; gap: 8px; }
-    .media-mode legend { padding: 0 4px; color: var(--muted); font-size: 12px; }
-    label { display: flex; align-items: center; gap: 8px; font-size: 13.5px; cursor: pointer; }
-    input[type="checkbox"] { accent-color: var(--accent); width: 15px; height: 15px; margin: 0; }
-    .number-row { justify-content: space-between; }
-    .number-row input { width: 84px; padding: 4px 6px; border: 1px solid var(--line); border-radius: 5px; background: transparent; color: var(--ink); }
-    .field-hint { margin: -4px 0 6px; color: var(--muted); font-size: 11px; }
-    #grant { background: transparent; color: var(--accent); border: 1px dashed var(--accent); font-size: 13px; }
-    .option { display: flex; align-items: center; gap: 8px; }
-    .option > input { flex: 0 0 auto; }
-    .option > span { flex: 1; }
-    .info { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; margin: 0; border: 1px solid var(--muted); border-radius: 50%; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; text-align: center; cursor: pointer; }
-    .info:hover, .info:focus-visible { border-color: var(--accent); color: var(--accent); }
-    #help { margin: -4px 0 12px; padding: 8px 10px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--muted); font-size: 12px; }
-    .permission-hint { margin: -4px 0 12px; color: var(--muted); font-size: 12px; }
-    .jex-note { margin: -4px 0 12px; padding: 8px 10px; border-left: 3px solid var(--accent); background: color-mix(in srgb, var(--accent) 10%, transparent); color: var(--muted); font-size: 12px; }
-    [hidden] { display: none !important; }
+
+    .action { display: grid; gap: 1px; width: 100%; margin: 0 0 8px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); text-align: left; cursor: pointer; }
+    .action strong { font-weight: 620; }
+    .action span { color: var(--muted); font-size: 12px; }
+    .action:not(:disabled):hover { border-color: var(--accent); }
+    .action.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+    .action.primary span { color: inherit; opacity: .85; }
+    .action:disabled { opacity: .45; cursor: default; }
+    .history { margin-bottom: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    .history .action { margin: 0; border: 0; border-radius: 8px 8px 0 0; background: transparent; }
+    .history:has(.action:not(:disabled):hover) { border-color: var(--accent); }
+    .limit { display: flex; align-items: center; gap: 7px; padding: 7px 12px 9px; border-top: 1px dashed var(--line); color: var(--muted); font-size: 12.5px; cursor: pointer; }
+    .limit input[type=number] { width: 72px; padding: 2px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+    .limit input[type=number]:disabled { opacity: .5; }
+
+    details { margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel); }
+    summary { padding: 9px 12px; font-weight: 600; cursor: pointer; list-style: none; }
+    summary::-webkit-details-marker { display: none; }
+    summary::before { content: "›"; display: inline-block; width: 14px; color: var(--muted); transition: transform .12s; }
+    details[open] summary::before { transform: rotate(90deg); }
+    summary small { color: var(--muted); font-weight: 400; }
+    .group { padding: 4px 12px 10px; border-top: 1px solid var(--line); }
+    .group h3 { margin: 8px 0 6px; color: var(--muted); font-size: 11px; font-weight: 650; letter-spacing: .05em; text-transform: uppercase; }
+    .option { display: grid; grid-template-columns: auto 1fr auto; align-items: start; column-gap: 8px; margin: 0 0 7px; font-size: 13px; cursor: pointer; }
+    .option input { margin: 2px 0 0; accent-color: var(--accent); width: 15px; height: 15px; }
+    .info { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; padding: 0; border: 1px solid var(--muted); border-radius: 50%; background: transparent; color: var(--muted); font-size: 11px; font-weight: 700; line-height: 1; cursor: pointer; }
+    .info:hover, .info:focus-visible, .info[aria-expanded=true] { border-color: var(--accent); color: var(--accent); }
+    #help { margin: -2px 0 9px; padding: 7px 9px; border-left: 3px solid var(--accent); border-radius: 4px; background: var(--accent-soft); color: var(--muted); font-size: 12px; }
+    .number-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 0 0 7px; font-size: 13px; }
+    .number-row input { width: 80px; padding: 3px 6px; border: 1px solid var(--line); border-radius: 5px; background: var(--bg); }
+    #grant { width: 100%; margin: 2px 0 4px; padding: 6px 10px; border: 1px dashed var(--accent); border-radius: 6px; background: transparent; color: var(--accent); font-size: 12.5px; cursor: pointer; }
+    .jex-note { margin: 0 0 6px; color: var(--muted); font-size: 12px; }
+
+    #job { margin-bottom: 10px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--accent-soft); }
+    #progress-wrap { display: flex; align-items: center; gap: 8px; }
+    #progress-wrap progress { flex: 1; height: 7px; accent-color: var(--accent); }
+    #progress-percent { min-width: 36px; text-align: right; color: var(--muted); font-size: 12px; font-variant-numeric: tabular-nums; }
+    #activity-wrap summary { padding: 6px 0 0; color: var(--muted); font-size: 12px; font-weight: 500; }
+    #activity-wrap { border: 0; margin: 0; background: transparent; }
+    #activity-list { display: grid; gap: 4px; max-height: 110px; overflow-y: auto; margin: 6px 0 0; padding: 0 0 0 16px; color: var(--muted); font-size: 11.5px; }
+    #activity-list li:last-child { color: var(--ink); }
+    #cancel-job { width: 100%; margin-top: 8px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); border-radius: 6px; background: transparent; color: var(--error); cursor: pointer; }
+    #status { min-height: 1.4em; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
+    #status:empty { display: none; }
+    #status.error { color: var(--error); }
+    #job:not(:has(> :not([hidden]):not(:empty))) { display: none; }
+
+    footer { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+    footer button { padding: 0; border: 0; background: none; color: var(--muted); font-size: 12px; text-decoration: underline; text-underline-offset: 2px; cursor: pointer; }
+    footer button:hover { color: var(--ink); }
+    #download-failures { color: var(--error); }
   </style>
 </head>
 <body>
-  <h1>Export conversation</h1>
-  <p class="lead">Text, tables, sources, images, and files.</p>
-  <fieldset class="formats" aria-label="Export format">
-    <label><input type="radio" name="format" value="md"> Markdown</label>
-    <label><input type="radio" name="format" value="html"> HTML</label>
-    <label><input type="radio" name="format" value="both"> Both</label>
-    <label><input type="radio" name="format" value="jex"> JEX</label>
-  </fieldset>
-  <fieldset>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-images"><span>Save images in a separate directory</span><button class="info" type="button" data-help="Downloads image assets into a separate images/ directory inside the export archive. It keeps Markdown links instead of embedding Base64 data." aria-label="What does Save images in a separate directory do?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-json"><span>Include raw data (JSON)</span><button class="info" type="button" data-help="Adds the original conversation JSON to the export root. Useful for backups and future re-rendering." aria-label="What does Include raw data do?">i</button></label>
-    <label class="option"><input type="checkbox" id="opt-thinking"><span>Include thinking summaries</span><button class="info" type="button" data-help="Keeps visible reasoning summaries exposed by ChatGPT. They are grouped into one Thinking section with a total duration. Hidden chain-of-thought is never exported." aria-label="What are thinking summaries?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-files"><span>Save attachments and generated files in a separate directory</span><button class="info" type="button" data-help="Downloads attachments and generated files into a separate files/ directory inside the export archive. It keeps Markdown links instead of embedding Base64 data." aria-label="What does Save attachments and generated files in a separate directory do?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-branches"><span>Export all branches/regenerations</span><button class="info" type="button" data-help="Includes alternative response branches and regenerations when ChatGPT exposes them." aria-label="What does Export all branches do?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-incremental"><span>Incremental history export</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>
-    <label class="option jex-hidden"><input type="checkbox" id="opt-checksums"><span>SHA-256 checksums in manifest</span><button class="info" type="button" data-help="Adds a SHA-256 hash for each exported file so the archive can be verified later." aria-label="What do SHA-256 checksums do?">i</button></label>
-    <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
-    <label class="number-row jex-only" hidden>Pause between conversations (s) <input type="number" id="opt-jex-delay" min="0" max="30" step="0.5" value="2"></label>
-  <p id="jex-note" class="jex-note" hidden>JEX automatically includes the note, images, attachments, and generated files. Exporting all history creates one JEX file containing a single “ChatGPT conversations” notebook with one note per conversation. Import that one file into Joplin. The notes follow Joplin’s active light or dark theme.</p>
-  </fieldset>
-  <fieldset class="media-mode" aria-label="Markdown flavor">
-    <legend>Markdown flavor</legend>
-    <label><input type="radio" name="md-html" value="html"> Markdown with HTML elements</label>
-    <label><input type="radio" name="md-html" value="pure"> Pure Markdown only</label>
-    <button class="info" type="button" data-help="Markdown with HTML elements renders a user message as a self-contained table block with a pale blue background and no borders, holding the whole message: sent images, attachments, pasted code and pasted tables included. Pure Markdown renders the question as one table cell; multi-line questions stay together with line breaks, and images, attachments, code and tables follow it. A message with no sentence at all still gets a card: an image or attachment sent without a comment moves into it. Editors that rewrite Markdown, such as Joplin's Rich Text editor, may escape raw HTML; use Pure Markdown there." aria-label="What is the Markdown flavor?">i</button>
-  </fieldset>
-  <fieldset class="media-mode jex-hidden" aria-label="Markdown image and file mode">
-    <legend>Markdown images and files</legend>
-    <label><input type="radio" name="media-mode" value="links" checked> Keep images and files as links</label>
-    <label><input type="radio" name="media-mode" value="embedded"> Embed images and files (Base64)</label>
-    <button class="info" type="button" data-help="Keep images and files as links leaves remote URLs or saved relative files. Embed images and files (Base64) copies binary media into the Markdown itself. Normal web links, source citations, and text are never converted to Base64." aria-label="What is the image and file mode?">i</button>
-  </fieldset>
-  <button id="grant" type="button" hidden title="Optional permission to download media hosted outside ChatGPT">Allow external media</button>
-  <p class="permission-hint">External media permission only allows downloading images or files hosted outside ChatGPT. It does not choose between links and Base64 embedding.</p>
+  <header>
+    <img src="../icons/icon-32.png" alt="">
+    <div>
+      <h1>ChatGPT Export</h1>
+      <p id="tab-hint">Save your conversations as files.</p>
+    </div>
+  </header>
+
+  <section class="step">
+    <h2>1 · Format</h2>
+    <fieldset class="formats" aria-label="Export format">
+      <label><input type="radio" name="format" value="md"> Markdown</label>
+      <label><input type="radio" name="format" value="html"> HTML</label>
+      <label><input type="radio" name="format" value="both"> Both</label>
+      <label><input type="radio" name="format" value="jex"> Joplin</label>
+    </fieldset>
+    <p id="format-hint" class="hint"></p>
+  </section>
+
+  <section class="step">
+    <h2>2 · What to export</h2>
+    <button id="current" class="action primary" type="button"><strong>This conversation</strong><span>The chat open in this tab</span></button>
+    <button id="pick" class="action" type="button"><strong>Choose conversations…</strong><span>Search, filter and tick them in a large window. You can delete from there too.</span></button>
+    <div class="history">
+      <button id="all" class="action" type="button"><strong id="all-title">Entire history</strong><span>Includes archived, project and shared chats</span></button>
+      <label class="limit"><input type="checkbox" id="opt-limit"> Only the <input type="number" id="opt-history-count" min="1" max="100000" step="1" value="100" aria-label="Number of recent conversations"> most recent <button class="info" type="button" data-help="Limited export selects the most recently updated active conversations and is much faster to start. Full history also includes archived, project, and shared conversations." aria-label="What does the limit do?" style="margin-left:auto">i</button></label>
+    </div>
+  </section>
+
+  <details id="advanced">
+    <summary>Options <small>— images, thinking, Markdown style…</small></summary>
+
+    <div class="group">
+      <h3>Content</h3>
+      <label class="option"><input type="checkbox" id="opt-thinking"><span>Thinking summaries</span><button class="info" type="button" data-help="Keeps visible reasoning summaries exposed by ChatGPT. They are grouped into one Thinking section with a total duration. Hidden chain-of-thought is never exported." aria-label="What are thinking summaries?">i</button></label>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-branches"><span>All branches and regenerations</span><button class="info" type="button" data-help="Includes alternative response branches and regenerations when ChatGPT exposes them." aria-label="What does All branches and regenerations do?">i</button></label>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-json"><span>Raw data (JSON)</span><button class="info" type="button" data-help="Adds the original conversation JSON to the export root. Useful for backups and future re-rendering." aria-label="What does Raw data do?">i</button></label>
+    </div>
+
+    <div class="group">
+      <h3>Images &amp; files</h3>
+      <p class="jex-note jex-only" hidden>Joplin exports always include images, attachments and generated files inside the .jex. Exporting several conversations creates one .jex with a single “ChatGPT conversations” notebook; notes follow Joplin’s light or dark theme.</p>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-images"><span>Save images in an images/ folder</span><button class="info" type="button" data-help="Downloads image assets into a separate images/ directory inside the export archive. It keeps Markdown links instead of embedding Base64 data." aria-label="What does Save images in a folder do?">i</button></label>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-files"><span>Save attachments and generated files in a files/ folder</span><button class="info" type="button" data-help="Downloads attachments and generated files into a separate files/ directory inside the export archive. It keeps Markdown links instead of embedding Base64 data." aria-label="What does Save attachments in a folder do?">i</button></label>
+      <label class="option jex-hidden"><input type="radio" name="media-mode" value="links" checked><span>Keep images and files as links</span><button class="info" type="button" data-help="Keep images and files as links leaves remote URLs or saved relative files. Embed images and files (Base64) copies binary media into the Markdown itself. Normal web links, source citations, and text are never converted to Base64." aria-label="What is the image and file mode?">i</button></label>
+      <label class="option jex-hidden"><input type="radio" name="media-mode" value="embedded"><span>Embed images and files (Base64)</span><button class="info" type="button" data-help="Copies binary media into the Markdown itself: one self-contained file, but much larger. Normal web links, source citations, and text are never converted to Base64." aria-label="What does Embed images and files do?">i</button></label>
+      <button id="grant" type="button" hidden>Allow external media</button>
+      <p id="grant-hint" class="jex-note" hidden>This optional permission only allows downloading images or files hosted outside ChatGPT. It does not choose between links and Base64.</p>
+    </div>
+
+    <div class="group">
+      <h3>Markdown flavor</h3>
+      <label class="option"><input type="radio" name="md-html" value="html"><span>Markdown with HTML elements</span><button class="info" type="button" data-help="Renders each of your messages as a self-contained table block with a pale blue background and no borders, holding the whole message: sent images, attachments, pasted code and pasted tables included. A message with no sentence at all still gets a card: an image or attachment sent without a comment moves into it." aria-label="What is Markdown with HTML elements?">i</button></label>
+      <label class="option"><input type="radio" name="md-html" value="pure"><span>Pure Markdown only</span><button class="info" type="button" data-help="Renders your question as one table cell; multi-line questions stay together with line breaks, and images, attachments, code and tables follow it. Editors that rewrite Markdown, such as Joplin's Rich Text editor, may escape raw HTML; use Pure Markdown there." aria-label="What is Pure Markdown?">i</button></label>
+    </div>
+
+    <div class="group">
+      <h3>History export</h3>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-incremental"><span>Incremental (skip unchanged)</span><button class="info" type="button" data-help="Skips conversations that have not changed since the previous history export." aria-label="What does Incremental history export do?">i</button></label>
+      <label class="option jex-hidden"><input type="checkbox" id="opt-checksums"><span>SHA-256 checksums in manifest</span><button class="info" type="button" data-help="Adds a SHA-256 hash for each exported file so the archive can be verified later." aria-label="What do SHA-256 checksums do?">i</button></label>
+      <label class="number-row jex-hidden">Max ZIP size (MB) <input type="number" id="opt-part-size" min="100" max="4096" step="100" value="1024"></label>
+      <label class="number-row jex-only" hidden>Pause between conversations (s) <input type="number" id="opt-jex-delay" min="0" max="30" step="0.5" value="2"></label>
+    </div>
+  </details>
   <p id="help" role="status" hidden></p>
-  <button id="current" type="button">Export this conversation</button>
-  <button id="all" type="button">Export all history (.zip)</button>
-  <label class="number-row history-limit">Number of conversations <input type="number" id="opt-history-count" min="1" max="100000" step="1" value="100"></label>
-  <p class="field-hint">Limited export selects the most recently updated active conversations. Full history also includes archived, project, and shared conversations.</p>
-  <button id="selected" type="button">Export selected conversations</button>
-  <button id="manage" type="button">Choose, export, or delete conversations…</button>
-  <button id="cancel-job" type="button" hidden>Cancel running export</button>
-  <div id="progress-wrap" hidden><progress id="bar" value="0" max="100"></progress><span id="progress-percent">0%</span></div>
-  <section id="activity-wrap" aria-live="polite" hidden><h2 id="activity-title">Export activity</h2><ol id="activity-list"></ol></section>
-  <p id="status" role="status"></p>
-  <button id="download-failures" type="button" hidden>Download failure log</button>
-  <button id="download-log" type="button" hidden>Download diagnostic log</button>
+
+  <section id="job" aria-live="polite">
+    <div id="progress-wrap" hidden><progress id="bar" value="0" max="100"></progress><span id="progress-percent">0%</span></div>
+    <p id="status" role="status"></p>
+    <details id="activity-wrap" hidden><summary>Details</summary><ol id="activity-list"></ol></details>
+    <button id="cancel-job" type="button" hidden>Cancel export</button>
+  </section>
+
+  <footer>
+    <button id="download-failures" type="button" hidden>Download failure log</button>
+    <button id="download-log" type="button" hidden>Download diagnostic log</button>
+  </footer>
   <script src="popup.js"></script>
 </body>
 </html>

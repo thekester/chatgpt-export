@@ -2,8 +2,9 @@ const api = globalThis.browser ?? globalThis.chrome;
 const $ = (id) => document.getElementById(id);
 const btnCurrent = $("current");
 const btnAll = $("all");
-const btnSelected = $("selected");
-const btnManage = $("manage");
+const btnPick = $("pick");
+const tabHint = $("tab-hint");
+const formatHint = $("format-hint");
 const btnCancel = $("cancel-job");
 const btnGrant = $("grant");
 const bar = $("bar");
@@ -25,6 +26,13 @@ const optChecksums = $("opt-checksums");
 const optPartSize = $("opt-part-size");
 const optJexDelay = $("opt-jex-delay");
 const optHistoryCount = $("opt-history-count");
+const optLimit = $("opt-limit");
+const FORMAT_HINTS = {
+  md: "Markdown (.md) files with images and attachments.",
+  html: "Standalone web pages (.html) you can open in any browser.",
+  both: "Markdown and HTML side by side.",
+  jex: "One .jex file to import into Joplin (File › Import › JEX)."
+};
 const formatInputs = [...document.querySelectorAll('input[name="format"]')];
 const mediaModeInputs = [...document.querySelectorAll('input[name="media-mode"]')];
 const mdHtmlInputs = [...document.querySelectorAll('input[name="md-html"]')];
@@ -176,6 +184,11 @@ function loadOptions() {
   optPartSize.value = String(saved.partSizeMB ?? 1024);
   optJexDelay.value = String(Math.max(0, Math.min(30, Number(saved.jexDelayMs ?? 2000) / 1000)));
   optHistoryCount.value = String(Math.max(1, Math.min(100000, Number(saved.historyCount) || 100)));
+  optLimit.checked = !!saved.historyLimit;
+}
+
+function historyLimit() {
+  return Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100)));
 }
 
 function selectedFormat() {
@@ -183,8 +196,7 @@ function selectedFormat() {
   return el ? el.value : "both";
 }
 
-function currentOptions() {
-  const f = selectedFormat();
+function currentOptions(f = selectedFormat()) {
   const jex = f === "jex";
   const embeddedMd = !jex && mediaModeInputs.find((el) => el.checked)?.value === "embedded";
   return {
@@ -193,16 +205,20 @@ function currentOptions() {
     embeddedMd, modernEmbeddedMd: jex, branches: jex ? false : optBranches.checked, incremental: jex ? false : optIncremental.checked, checksums: jex ? false : optChecksums.checked,
     partSizeMB: Math.max(100, Math.min(4096, Number(optPartSize.value) || 1024)),
     jexDelayMs: Math.max(0, Math.min(30000, Math.round((Number(optJexDelay.value) || 0) * 1000))),
-    historyCount: Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100)))
+    historyCount: historyLimit(), historyLimit: optLimit.checked
   };
 }
 
 function updateFormatUI() {
-  const jex = selectedFormat() === "jex";
+  const format = selectedFormat();
+  const jex = format === "jex";
   document.querySelectorAll(".jex-hidden").forEach((el) => { el.hidden = jex; });
   document.querySelectorAll(".jex-only").forEach((el) => { el.hidden = !jex; });
-  $("jex-note").hidden = !jex;
-  btnAll.textContent = jex ? "Export all history (one .jex)" : "Export all history (.zip)";
+  formatHint.textContent = FORMAT_HINTS[format] || "";
+  optHistoryCount.disabled = !optLimit.checked;
+  $("all-title").textContent = optLimit.checked
+    ? `The ${historyLimit().toLocaleString()} most recent conversations`
+    : (jex ? "Entire history (one .jex)" : "Entire history (.zip)");
   refreshButtons();
   checkPermission();
 }
@@ -259,15 +275,18 @@ function refreshButtons() {
   const unavailable = tabChecked && !tabId;
   btnCurrent.disabled = busy || unavailable;
   btnAll.disabled = busy || unavailable;
-  btnSelected.disabled = busy || unavailable;
-  btnManage.disabled = busy || unavailable;
+  btnPick.disabled = busy || unavailable;
+  if (unavailable) {
+    tabHint.textContent = "Open chatgpt.com in this tab to export.";
+    tabHint.classList.add("error");
+  }
 }
 
 function setBusy(b) {
   busy = b;
   btnCancel.hidden = !b;
   btnCancel.disabled = false;
-  btnCancel.textContent = "Cancel running export";
+  btnCancel.textContent = "Cancel export";
   refreshButtons();
 }
 
@@ -281,7 +300,7 @@ btnCancel.addEventListener("click", async () => {
     if (!result || !result.ok) throw new Error(result?.error || "Could not cancel the running job.");
   } catch (error) {
     btnCancel.disabled = false;
-    btnCancel.textContent = "Cancel running export";
+    btnCancel.textContent = "Cancel export";
     setStatus(error.message || "Could not cancel the running job.", true);
   }
 });
@@ -289,13 +308,14 @@ btnCancel.addEventListener("click", async () => {
 // Images outside chatgpt.com (web search, products) require access to all sites.
 async function checkPermission() {
   const embedded = mediaModeInputs.find((el) => el.checked)?.value === "embedded";
+  const grantHint = $("grant-hint");
   if ((!optImages.checked && !optFiles.checked && !embedded && selectedFormat() !== "jex") || !api.permissions) {
-    btnGrant.hidden = true;
+    btnGrant.hidden = grantHint.hidden = true;
     return;
   }
   try {
     const granted = await api.permissions.contains(ALL_SITES);
-    btnGrant.hidden = false;
+    btnGrant.hidden = grantHint.hidden = false;
     btnGrant.textContent = granted ? "Disable external media" : "Allow external media";
     btnGrant.title = granted
       ? "Remove permission to download media hosted outside ChatGPT"
@@ -325,11 +345,20 @@ btnGrant.addEventListener("click", async () => {
   checkPermission();
 });
 
-document.querySelectorAll(".info").forEach((button) => {
+// Each "i" bubble shows its explanation right under its own option; clicking
+// it again hides it.
+const infoButtons = [...document.querySelectorAll(".info")];
+infoButtons.forEach((button) => {
+  button.setAttribute("aria-expanded", "false");
   button.addEventListener("click", (event) => {
     event.preventDefault();
     event.stopPropagation();
+    const wasOpen = button.getAttribute("aria-expanded") === "true";
+    infoButtons.forEach((other) => other.setAttribute("aria-expanded", "false"));
+    if (wasOpen) { help.hidden = true; return; }
+    button.setAttribute("aria-expanded", "true");
     help.textContent = button.dataset.help || "";
+    (button.closest("label") || button).after(help);
     help.hidden = !help.textContent;
   });
 });
@@ -338,7 +367,8 @@ const CONTENT_SCRIPT_FILES = [
   "lib/marked.umd.js",
   "src/zip.js",
   "src/render.js",
-  "src/content.js"
+  "src/content.js",
+  "src/picker.js"
 ];
 
 function missingReceiver(error) {
@@ -402,7 +432,6 @@ async function init() {
     const onChatGPT = await resolveActiveTab();
     const resumed = await restoreExportActivity();
     if (resumed) pollExportActivity();
-    if (!onChatGPT && !resumed) setStatus("Open chatgpt.com in this tab to export.", true);
   } catch {
     tabChecked = true;
     tabId = null;
@@ -573,14 +602,24 @@ api.runtime.onMessage.addListener((msg, sender) => {
   if (percent >= 100 && exportTabId != null) setTimeout(pollExportActivity, 150);
 });
 
-[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay, optHistoryCount].forEach((el) => el.addEventListener("change", saveOptions));
+[...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay, optHistoryCount, optLimit].forEach((el) => el.addEventListener("change", saveOptions));
+optHistoryCount.addEventListener("input", updateFormatUI);
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
-btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: 0 }));
-btnSelected.addEventListener("click", () => run("cgx-export-all", { conversationLimit: Math.max(1, Math.min(100000, Math.floor(Number(optHistoryCount.value) || 100))) }));
-btnManage.addEventListener("click", () => {
-  if (!tabId) return;
-  const url = `${api.runtime.getURL("popup/manager.html")}?tabId=${encodeURIComponent(tabId)}`;
-  api.tabs.create({ url, active: true });
+btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: optLimit.checked ? historyLimit() : 0 }));
+// Opens the large conversation picker inside the ChatGPT page, then closes
+// the popup so the user can work in it directly.
+btnPick.addEventListener("click", async () => {
+  if (busy) return;
+  try {
+    if (!tabId && !(await resolveActiveTab())) { setStatus("Open chatgpt.com in this tab to export.", true); return; }
+    const formats = Object.fromEntries(["md", "html", "both", "jex"].map((f) => [f, { ...currentOptions(f), incremental: false }]));
+    const r = await send({ type: "cgx-open-picker", formats, format: selectedFormat() });
+    if (!r || !r.ok) throw new Error(r?.error || "Could not open the conversation picker.");
+    window.close();
+  } catch (e) {
+    progressWrap.hidden = true;
+    setStatus(e.message || "Could not open the conversation picker. Reload the ChatGPT tab and try again.", true);
+  }
 });
 btnLog.addEventListener("click", downloadDiagnosticLog);
 btnFailures.addEventListener("click", downloadFailureLog);

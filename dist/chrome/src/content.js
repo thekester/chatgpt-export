@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.30 - content script
+// ChatGPT Export v0.6.31 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -34,6 +34,7 @@
   let lastProgressFailureCount = 0;
   let rateLimitUntil = 0;
   let managerListCache = null;
+  const progressListeners = new Set();
 
   function checkCancelled(){if(jobCancelled){const error=new Error('Export cancelled by user. You can start a new export.');error.name='AbortError';throw error;}}
   async function jobSleep(ms){const end=Date.now()+Math.max(0,ms);while(Date.now()<end){checkCancelled();await sleep(Math.min(150, end-Date.now()));}checkCancelled();}
@@ -634,6 +635,7 @@
       if(activityState.length>8)activityState.shift();
     }
     diag('progress',{percent:value,label,done,total});
+    for(const listener of progressListeners){try{listener(progressState);}catch(_){}}
     try{const message={type:'cgx-progress',percent:value,label,done,total,activity:activityState};if(liveFailureDetails.length!==lastProgressFailureCount){message.failures=liveFailureDetails;lastProgressFailureCount=liveFailureDetails.length;}Promise.resolve(api.runtime.sendMessage(message)).catch(()=>{});}catch(_){}
   }
 
@@ -1097,21 +1099,43 @@
     return{exportResult,exportError,deleteResults};
   }
 
-  function withBusyJob(sendResponse,kind,jobFactory){
-    if(busy){sendResponse({ok:false,error:'Another export or conversation action is already running in this tab.'});return true;}
+  function runBusyJob(kind,jobFactory){
+    if(busy)return Promise.resolve({ok:false,error:'Another export or conversation action is already running in this tab.'});
     busy=true;jobCancelled=false;activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:`Starting ${kind}…`,done:null,total:null,updatedAt:Date.now()};
     jobAbortController=new AbortController();
-    Promise.resolve().then(jobFactory).then(result=>sendResponse({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,`${kind} cancelled. You can start a new action.`);sendResponse({ok:false,cancelled,error:cancelled?'Export cancelled by user. You can start a new export.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})});}).finally(()=>{busy=false;jobAbortController=null;});
+    return Promise.resolve().then(jobFactory).then(result=>({ok:true,...result})).catch(error=>{const cancelled=jobCancelled||error.name==='AbortError';if(cancelled)progressPercent(progressState?progressState.percent:0,`${kind} cancelled. You can start a new action.`);return{ok:false,cancelled,error:cancelled?'Export cancelled by user. You can start a new export.':redactDiagnosticText(error.message||error),diagnostics:cancelled?null:diagnosticSnapshot({error})};}).finally(()=>{busy=false;jobAbortController=null;});
+  }
+  function withBusyJob(sendResponse,kind,jobFactory){
+    runBusyJob(kind,jobFactory).then(sendResponse);
     return true;
   }
+  function cancelJob(){
+    if(!busy)return{ok:false,error:'No running job to cancel.'};
+    jobCancelled=true;
+    if(jobAbortController)jobAbortController.abort();
+    if(progressState)progressState={...progressState,label:'Cancellation requested; finishing the current request safely…',updatedAt:Date.now()};
+    progressPercent(progressState?progressState.percent:0,'Cancellation requested; finishing the current request safely…');
+    return{ok:true};
+  }
+
+  // Internal bridge for the in-page conversation picker (src/picker.js). It
+  // lives in the extension's isolated world, so the ChatGPT page cannot see it.
+  globalThis.CGX_core={
+    isBusy:()=>busy,
+    progress:()=>progressState,
+    hasCachedList:()=>!!managerListCache,
+    cachedItems:()=>managerListCache?managerListCache.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt):null,
+    listConversations:()=>runBusyJob('conversation list',managerList),
+    runActions:(actions,options)=>runBusyJob('selected conversation actions',()=>managerRun({actions,options})),
+    cancel:cancelJob,
+    onProgress(listener){progressListeners.add(listener);return()=>progressListeners.delete(listener);}
+  };
 
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
-    if(msg.type==='cgx-cancel-job'){
-      if(!busy){sendResponse({ok:false,error:'No running job to cancel.'});return false;}
-      jobCancelled=true;
-      if(jobAbortController)jobAbortController.abort();
-      if(progressState)progressState={...progressState,label:'Cancellation requested; finishing the current request safely…',updatedAt:Date.now()};
-      progressPercent(progressState?progressState.percent:0,'Cancellation requested; finishing the current request safely…');
+    if(msg.type==='cgx-cancel-job'){sendResponse(cancelJob());return false;}
+    if(msg.type==='cgx-open-picker'){
+      if(typeof globalThis.CGX_openPicker!=='function'){sendResponse({ok:false,error:'The conversation picker is not loaded. Reload the ChatGPT tab.'});return false;}
+      globalThis.CGX_openPicker(msg.formats||{},msg.format||'both');
       sendResponse({ok:true});return false;
     }
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,failures:liveFailureDetails,lastJob:lastExportState}));return true;}
