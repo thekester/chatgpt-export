@@ -1,4 +1,4 @@
-// ChatGPT Export v0.6.25 - content script
+// ChatGPT Export v0.6.26 - content script
 (() => {
   const api = globalThis.browser ?? globalThis.chrome;
   const pageFetch = globalThis.content && globalThis.content.fetch ? globalThis.content.fetch.bind(globalThis.content) : fetch;
@@ -506,6 +506,8 @@
     const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
   }
 
+  function exportFileStamp(){return new Date().toISOString().replace('T','_').replace(/[:.]/g,'-');}
+
   function jexId() {
     const raw = globalThis.crypto && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random()}`;
     return raw.replace(/[^a-f0-9]/gi, '').padEnd(32, '0').slice(0, 32).toLowerCase();
@@ -864,7 +866,7 @@
     const concurrency=1;
     let nextIndex=0,completed=0;
     const active=new Set();
-    const stamp=new Date().toISOString().slice(0,10);
+    const stamp=exportFileStamp();
     const startedAt=Date.now();
     const durationLabel=seconds=>{
       const value=Math.max(0,Math.ceil(seconds));
@@ -930,7 +932,7 @@
     if((meta.errors&&meta.errors.length)||meta.imageFailures||meta.fileFailures)files.push({name:'_diagnostic.log',content:diagnosticLog({result:{conversation_failures:(meta.errors||[]).length,image_failures:meta.imageFailures||0,file_failures:meta.fileFailures||0,part:partNo}})});
     files.push({name:'_capabilities.json',content:JSON.stringify(capabilitySnapshot(),null,2)});
     await addManifest(files,{schema_version:4,exported_at:new Date().toISOString(),embedded_markdown:!!opts.embeddedMd,conversation_count:index.length,failures:(meta.errors||[]).length,image_failures:meta.imageFailures||0,file_failures:meta.fileFailures||0,workspace_ids:meta.accounts||[],part:partNo,incremental_since:meta.since||null,capabilities:capabilitySnapshot()},opts.checksums);
-    const stamp=new Date().toISOString().slice(0,10);const suffix=partNo>1?`_part-${String(partNo).padStart(3,'0')}`:'';
+    const stamp=exportFileStamp();const suffix=partNo>1?`_part-${String(partNo).padStart(3,'0')}`:'';
     download(`chatgpt-export_${stamp}${suffix}.zip`,CGX_buildZip(files));
   }
 

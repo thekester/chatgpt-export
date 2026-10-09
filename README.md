@@ -157,6 +157,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.25**
+Current version: **0.6.26**
 
-This version makes limited exports scan only the requested number of most recently updated active conversations, rather than scanning the full account history first. Full history still includes archived, project, and shared conversations. The count selector works for JEX and ZIP exports; HTTP 429 cooldowns and live detailed failure logs remain supported.
+This version adds a timestamp to history-export filenames so multiple backups on the same day do not share the same suggested filename. Limited exports scan only the requested number of most recently updated active conversations; full history still includes archived, project, and shared conversations. HTTP 429 cooldowns and live detailed failure logs remain supported.
