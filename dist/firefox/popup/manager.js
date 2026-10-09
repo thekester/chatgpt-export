@@ -16,7 +16,23 @@ function setStatus(message, error = false) {
 
 function visibleItems() {
   const query = $("search").value.trim().toLocaleLowerCase();
-  return items.filter((item) => `${item.title} ${item.project} ${item.archived ? "archived" : ""} ${item.shared ? "shared" : ""}`.toLocaleLowerCase().includes(query));
+  const from = $("date-from").value ? new Date(`${$("date-from").value}T00:00:00`).getTime() : -Infinity;
+  const to = $("date-to").value ? new Date(`${$("date-to").value}T23:59:59.999`).getTime() : Infinity;
+  const filtered = items.filter((item) => {
+    const updated = item.updatedAt ? new Date(item.updatedAt).getTime() : NaN;
+    return `${item.title} ${item.project} ${item.archived ? "archived" : ""} ${item.shared ? "shared" : ""}`.toLocaleLowerCase().includes(query)
+      && (Number.isNaN(updated) ? from === -Infinity && to === Infinity : updated >= from && updated <= to);
+  });
+  const sort = $("sort-by").value;
+  filtered.sort((a, b) => {
+    if (sort === "title-asc" || sort === "title-desc") {
+      const order = (a.title || "").localeCompare(b.title || "", undefined, { sensitivity: "base" });
+      return sort === "title-asc" ? order : -order;
+    }
+    const order = (Date.parse(a.updatedAt) || 0) - (Date.parse(b.updatedAt) || 0);
+    return sort === "oldest" ? order : -order;
+  });
+  return filtered;
 }
 
 function actionCounts() {
@@ -38,7 +54,7 @@ function render() {
   tbody.replaceChildren();
   if (!pageItems.length) {
     const row = document.createElement("tr"), cell = document.createElement("td");
-    cell.colSpan = 5; cell.className = "muted"; cell.textContent = items.length ? "No conversations match this search." : "No conversations loaded.";
+    cell.colSpan = 5; cell.className = "muted"; cell.textContent = items.length ? "No conversations match these search and date filters." : "No conversations loaded.";
     row.appendChild(cell); tbody.appendChild(row);
   }
   for (const item of pageItems) {
@@ -69,6 +85,9 @@ function render() {
   $("next").disabled = currentPage >= pages - 1 || running;
   $("reload").disabled = running;
   $("search").disabled = running;
+  $("sort-by").disabled = running;
+  $("date-from").disabled = running;
+  $("date-to").disabled = running;
   $("bulk-action").disabled = running;
   $("select-visible").disabled = running;
   updateVisibleCheckbox(); updateSummary();
@@ -178,6 +197,9 @@ async function runActions(planned) {
 
 $("reload").addEventListener("click", loadConversations);
 $("search").addEventListener("input", () => { currentPage = 0; render(); });
+$("sort-by").addEventListener("change", () => { currentPage = 0; render(); });
+$("date-from").addEventListener("change", () => { currentPage = 0; render(); });
+$("date-to").addEventListener("change", () => { currentPage = 0; render(); });
 $("previous").addEventListener("click", () => { currentPage--; render(); });
 $("next").addEventListener("click", () => { currentPage++; render(); });
 $("select-visible").addEventListener("change", (event) => {

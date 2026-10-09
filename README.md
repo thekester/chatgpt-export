@@ -158,6 +158,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.27**
+Current version: **0.6.28**
 
-This version adds a conversation manager for per-conversation export, permanent deletion, or export-then-delete actions. Deletion requires explicit confirmation and combined actions only delete conversations whose export succeeds. History-export filenames include timestamps; limited exports scan only requested recent active conversations, while full history includes archived, project, and shared conversations.
+This version improves the conversation manager with sorting by update date or title and date-range filters, making older conversations easier to find. It also adds per-conversation export, permanent deletion, or export-then-delete actions. Deletion requires explicit confirmation and combined actions only delete conversations whose export succeeds. History-export filenames include timestamps; limited exports scan only requested recent active conversations, while full history includes archived, project, and shared conversations.

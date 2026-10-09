@@ -15,9 +15,11 @@
     .top { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:8px; }
     .intro,.hint,.muted { color:var(--muted); }
     .intro { margin:0 0 20px; }
-    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) auto auto; gap:10px; align-items:center; margin:16px 0 10px; }
+    .toolbar { display:grid; grid-template-columns:minmax(220px,1fr) minmax(170px,auto) auto auto; gap:10px; align-items:center; margin:16px 0 10px; }
     input,select,button { font:inherit; }
-    input[type=search],select { min-height:38px; padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); }
+    input[type=search],input[type=date],select { min-height:38px; padding:7px 10px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); }
+    .date-filter { display:flex; align-items:center; gap:6px; color:var(--muted); font-size:12px; white-space:nowrap; }
+    .date-filter input { min-width:135px; }
     button { padding:9px 13px; border:1px solid var(--line); border-radius:7px; background:var(--panel); color:var(--ink); cursor:pointer; }
     button.primary { background:var(--accent); color:#fff; border-color:var(--accent); font-weight:650; }
     button.danger { color:var(--danger); border-color:color-mix(in srgb,var(--danger) 55%,var(--line)); }
@@ -44,7 +46,8 @@
     .warning { padding:10px 12px; border-left:3px solid var(--danger); background:color-mix(in srgb,var(--danger) 9%,transparent); }
     .confirm-row { display:flex; align-items:flex-start; gap:9px; margin:16px 0; }
     .dialog-actions { display:flex; justify-content:flex-end; gap:8px; }
-    @media (max-width:700px) { main{padding:14px}.toolbar{grid-template-columns:1fr 1fr}.toolbar input{grid-column:1/-1}.table-wrap{max-height:60vh}td.title{min-width:220px}.runbar{align-items:flex-start;flex-direction:column} }
+    @media (max-width:900px) { .toolbar{grid-template-columns:minmax(180px,1fr) minmax(160px,auto)}.toolbar #counts{grid-column:1/-1} }
+    @media (max-width:700px) { main{padding:14px}.toolbar{grid-template-columns:1fr 1fr}.toolbar #search,.toolbar #counts{grid-column:1/-1}.date-filter{justify-content:space-between}.date-filter input{min-width:0;width:68%}.table-wrap{max-height:60vh}td.title{min-width:220px}.runbar{align-items:flex-start;flex-direction:column} }
   </style>
 </head>
 <body>
@@ -54,7 +57,13 @@
     <p id="status" role="status">Connecting to the ChatGPT tab…</p>
     <progress id="progress" max="100" value="0" hidden></progress>
     <div class="toolbar">
-      <input id="search" type="search" placeholder="Search conversation titles" aria-label="Search conversation titles">
+      <input id="search" type="search" placeholder="Search titles and projects" aria-label="Search titles and projects">
+      <select id="sort-by" aria-label="Sort conversations">
+        <option value="recent">Most recent</option><option value="oldest">Oldest first</option>
+        <option value="title-asc">Title A–Z</option><option value="title-desc">Title Z–A</option>
+      </select>
+      <label class="date-filter">From <input id="date-from" type="date" aria-label="Updated from date"></label>
+      <label class="date-filter">To <input id="date-to" type="date" aria-label="Updated to date"></label>
       <select id="bulk-action" aria-label="Action for checked rows">
         <option value="">Set action for checked rows…</option>
         <option value="none">Leave unchanged</option><option value="export">Export</option>
