@@ -58,7 +58,7 @@ Firefox uses `background.scripts`, while Chromium-based browsers use `background
 3. Pick a format (**Markdown**, **HTML**, **Both** or **Joplin**).
 4. Choose what to export:
    - **This conversation**: the chat open in the tab.
-   - **Choose conversations…**: opens a large window over ChatGPT where you search, filter by date or location, tick conversations (Shift-click selects a range) and export them. The same window can delete the selection, optionally exporting a backup first. You can send a running job to the background and keep using ChatGPT.
+   - **Choose conversations…**: opens a large window over ChatGPT where you search, filter by date or location, tick conversations (Shift-click selects a range) and export them. After an export, you can choose to delete the exported conversations from ChatGPT, with a separate confirmation. You can send a running job to the background and keep using ChatGPT.
    - **Entire history**: everything, or only the N most recent conversations.
 5. Extra settings are under **Options**; each **i** bubble explains its option.
 
@@ -69,7 +69,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 | Option | Effect |
 | --- | --- |
 | Markdown / HTML / Both / JEX | Selects the output format. **Both** means Markdown and HTML. **JEX** creates a native Joplin import file for the current conversation; **Export all history** creates one `.jex` notebook containing one note per accessible conversation. |
-| Choose conversations… | Opens an in-page picker with search, period, location and sort filters. Export the ticked conversations in the chosen format, or delete them. Deletion requires confirmation and, by default, exports a backup first; a conversation is deleted only if its export succeeded. |
+| Choose conversations… | Opens an in-page picker with search, period, location and sort filters. Export the ticked conversations in the chosen format, or delete them. Deletion is never automatic: after an export, **Delete these N from ChatGPT…** offers to delete only the conversations that exported successfully, once you have checked the downloaded file. **Delete…** exports a backup first by default, then asks again. Every deletion needs a separate confirmation with an “I understand” checkbox. |
 | Save images in a separate directory | Downloads images into an `images/` directory inside the export archive and keeps Markdown links to them. |
 | Save attachments and generated files in a separate directory | Preserves documents and generated files in a `files/` directory inside the export archive and keeps Markdown links to them. |
 | Markdown flavor | Choose **Markdown with HTML elements** or **Pure Markdown only**. It controls whether the Markdown file is allowed to contain raw HTML tags, and changes how a user question is rendered (see below). |
