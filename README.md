@@ -162,6 +162,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.34**
+Current version: **0.6.35**
 
-This version streams conversation pages into the in-page picker as the account scan progresses. You can export or delete selected conversations as soon as they are loaded, while the scan continues fetching the remaining pages. Only one selected action runs at a time; cancelling during one stops both that action and the scan. Search, filters, sorting and range selection remain available. Deletion is always a separate, explicit step: optionally export a backup, review it, then confirm deletion; only successfully exported conversations are offered for deletion.
+This version improves selected conversation deletion while a history scan is still running, removes deleted conversations from the picker even if later scan pages contain duplicates, and clarifies that a deletion request may take up to 10 minutes to disappear from ChatGPT history. Selected conversations can still be exported or deleted while the scan continues; only one selected action runs at a time. Deletion remains a separate, explicit step, and only successfully exported conversations are offered for deletion.

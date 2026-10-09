@@ -221,6 +221,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   let listComplete = false;
   let actionBusy = false;
   const selected = new Set();
+  const deletedConversationKeys = new Set();
+  const deletedConversationIds = new Set();
   let formats = {}, format = "both";
   let phase = "idle"; // idle | loading | running
   let view = "all";
@@ -391,7 +393,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       finish(cancelled ? "Scan cancelled." : "Scan failed. Open to see why.");
       return;
     }
-    items = result.items || [];
+    items = (result.items || []).filter((item) => !isDeletedItem(item));
     listComplete = true;
     const known = new Set(items.map((item) => item.key));
     for (const key of [...selected]) if (!known.has(key)) selected.delete(key);
@@ -448,6 +450,10 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       while (rendered < Math.min(filtered.length, Math.max(oldRendered, CHUNK))) renderMore();
     }
     paintSelection();
+  }
+
+  function isDeletedItem(item) {
+    return deletedConversationKeys.has(item.key) || (item.conversationId != null && deletedConversationIds.has(String(item.conversationId)));
   }
 
   function renderEmpty(title, text, hint = "") {
@@ -629,7 +635,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   function receiveItems(batch) {
     const byKey = new Map(items.map((item) => [item.key, item]));
     for (const item of batch) {
-      if (!item || !item.key) continue;
+      if (!item || !item.key || isDeletedItem(item)) continue;
       const previous = byKey.get(item.key);
       byKey.set(item.key, previous ? {
         ...previous,
@@ -767,17 +773,23 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     const deletes = result.deleteResults || [];
     const ok = deletes.filter((entry) => entry.ok);
     const failed = deletes.filter((entry) => !entry.ok);
-    const lines = [`${plural(ok.length, "conversation")} permanently deleted.`];
+    const lines = ok.length
+      ? [`Deletion requested for ${plural(ok.length, "conversation")}. It may take up to 10 minutes to disappear from your ChatGPT history.`]
+      : ["No conversations were deleted."];
     if (failed.length) {
       const names = failed.slice(0, 3).map((entry) => `“${entry.title}”`).join(", ");
       lines.push(`${plural(failed.length, "conversation")} kept: ${names}${failed.length > 3 ? "…" : ""} (${failed[0].error || "deletion failed"}).`);
     }
-    const removed = new Set(ok.map((entry) => entry.key));
-    items = items.filter((item) => !removed.has(item.key));
+    const removed = new Set(ok.flatMap((entry) => [entry.key, entry.requestKey].filter(Boolean)));
+    const removedIds = new Set(ok.map((entry) => entry.conversationId).filter((id) => id != null).map(String));
+    for (const key of removed) deletedConversationKeys.add(key);
+    for (const id of removedIds) deletedConversationIds.add(id);
+    for (const item of items) if (removedIds.has(String(item.conversationId))) removed.add(item.key);
+    items = items.filter((item) => !removed.has(item.key) && !removedIds.has(String(item.conversationId)));
     for (const key of removed) selected.delete(key);
     applyFilters(true);
     showBanner(lines.join("\n"), failed.length ? "error" : "ok");
-    if (!globalThis.CGX_core.isListing()) finish(failed.length ? "Deletion done, with some problems. Open to see details." : "Deletion done.");
+    if (!globalThis.CGX_core.isListing()) finish(failed.length ? "Deletion requested with some problems. Open to see details." : "Deletion requested. It may take up to 10 minutes to disappear from your ChatGPT history.");
   }
 
   function showBanner(text, tone = "", actionLabel = "", action = null, keepOpen = false) {

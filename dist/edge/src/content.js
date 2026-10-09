@@ -1035,23 +1035,25 @@
   }
 
   function managerItemKey(item){return JSON.stringify([item._cgxAccountId||'',item.conversation_id||item.id||'']);}
+  function managerConversationId(item){return item.conversation_id||(!item._cgxShared?item.id:null)||null;}
+  function managerWasDeleted(item){const id=managerConversationId(item);return managerDeletedDuringScan.has(`key:${managerItemKey(item)}`)||(id!=null&&managerDeletedDuringScan.has(`id:${id}`));}
   function managerSummary(item){
     const accountId=item._cgxAccountId||null;
-    return{key:managerItemKey(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
+    return{key:managerItemKey(item),conversationId:managerConversationId(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
   }
   function publishPickerItems(rawItems){
     if(!rawItems||!rawItems.length)return;
     const byKey=new Map((managerListCache&&managerListCache.items||[]).map(item=>[managerItemKey(item),item]));
-    for(const item of rawItems){const key=managerItemKey(item);if(!managerDeletedDuringScan.has(key))byKey.set(key,{...(byKey.get(key)||{}),...item});}
+    for(const item of rawItems){const key=managerItemKey(item);if(!managerWasDeleted(item))byKey.set(key,{...(byKey.get(key)||{}),...item});}
     managerListCache={...(managerListCache||{}),complete:false,items:[...byKey.values()]};
-    const state={...(progressState||{}),items:rawItems.filter(item=>!managerDeletedDuringScan.has(managerItemKey(item))).map(managerSummary)};
+    const state={...(progressState||{}),items:rawItems.filter(item=>!managerWasDeleted(item)).map(managerSummary)};
     for(const listener of progressListeners){try{listener(state);}catch(_){}}
   }
   async function managerList(){
     managerDeletedDuringScan.clear();
     managerListCache={items:[],projectsIndex:[],accounts:[],complete:false};
     const listed=await listAll({conversationLimit:0},label=>progressPercent(1,label),publishPickerItems);
-    listed.items=listed.items.filter(item=>!managerDeletedDuringScan.has(managerItemKey(item)));
+    listed.items=listed.items.filter(item=>!managerWasDeleted(item));
     managerListCache={...listed,complete:true};
     progressPercent(100,`${listed.items.length} conversations ready to manage.`,listed.items.length,listed.items.length);
     const items=listed.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt);
@@ -1083,7 +1085,7 @@
   async function managerRun(msg){
     if(!managerListCache)throw new Error('Load the conversation list again before running actions.');
     const byKey=new Map(managerListCache.items.map(item=>[managerItemKey(item),item]));
-    const tasks=(Array.isArray(msg.actions)?msg.actions:[]).filter(x=>x&&['export','delete','export-delete'].includes(x.action)).map(x=>({item:byKey.get(x.key),action:x.action})).filter(x=>x.item);
+    const tasks=(Array.isArray(msg.actions)?msg.actions:[]).filter(x=>x&&['export','delete','export-delete'].includes(x.action)).map(x=>({requestKey:x.key,item:byKey.get(x.key),action:x.action})).filter(x=>x.item);
     if(!tasks.length)throw new Error('No valid conversation actions were selected.');
     const exportTasks=tasks.filter(x=>x.action==='export'||x.action==='export-delete');
     const deleteTasks=tasks.filter(x=>x.action==='delete'||x.action==='export-delete');
@@ -1102,24 +1104,27 @@
       checkCancelled();
       const key=managerItemKey(task.item);
       if(task.action==='export-delete'&&(exportError||failedKeys.has(key))){
-        deleteResults.push({key,title:task.item.title||'Untitled',ok:false,skipped:true,error:exportError?'Not deleted because the export did not complete.':'Not deleted because its export failed.'});
+        deleteResults.push({key,requestKey:task.requestKey,conversationId:managerConversationId(task.item),title:task.item.title||'Untitled',ok:false,skipped:true,error:exportError?'Not deleted because the export did not complete.':'Not deleted because its export failed.'});
         continue;
       }
       try{
         await deleteConversationPermanently(task.item);
-        deleteResults.push({key,title:task.item.title||'Untitled',ok:true});
+        deleteResults.push({key,requestKey:task.requestKey,conversationId:managerConversationId(task.item),title:task.item.title||'Untitled',ok:true});
         completedDeletes++;
       }catch(error){
         checkCancelled();
-        deleteResults.push({key,title:task.item.title||'Untitled',ok:false,error:redactDiagnosticText(error.message||error),status:error.status||null});
+        deleteResults.push({key,requestKey:task.requestKey,conversationId:managerConversationId(task.item),title:task.item.title||'Untitled',ok:false,error:redactDiagnosticText(error.message||error),status:error.status||null});
       }
       progressPercent(5+Math.round(90*deleteResults.length/Math.max(deleteTasks.length,1)),`Permanently deleted ${completedDeletes}/${deleteTasks.length} selected conversations…`,deleteResults.length,deleteTasks.length);
       await sleep(Math.max(0,Math.min(30000,Number((msg.options&&msg.options.jexDelayMs)??2000)||0)));
     }
     if(managerListCache){
       const removed=new Set(deleteResults.filter(x=>x.ok).map(x=>x.key));
-      for(const key of removed)managerDeletedDuringScan.add(key);
-      managerListCache={...managerListCache,items:managerListCache.items.filter(item=>!removed.has(managerItemKey(item)))};
+      for(const entry of deleteResults.filter(x=>x.ok)){
+        managerDeletedDuringScan.add(`key:${entry.key}`);
+        if(entry.conversationId!=null)managerDeletedDuringScan.add(`id:${entry.conversationId}`);
+      }
+      managerListCache={...managerListCache,items:managerListCache.items.filter(item=>!managerWasDeleted(item))};
     }
     return{exportResult,exportError,deleteResults};
   }
