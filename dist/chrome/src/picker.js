@@ -131,6 +131,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 .opt { display: flex; align-items: flex-start; gap: 10px; margin: 10px 0; font-size: 13.5px; cursor: pointer; }
 .opt input { margin-top: 2px; }
 .opt small { color: var(--muted); font-size: 12.5px; }
+.note { margin: 0 0 12px; padding: 10px 12px; border-left: 3px solid var(--ok); border-radius: 6px; background: var(--ok-soft); font-size: 13px; white-space: pre-line; }
 .confirm-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
 
 .pill { position: fixed; right: 18px; bottom: 18px; z-index: 2147483000; display: flex; align-items: center; gap: 12px; width: 320px; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: var(--bg); box-shadow: var(--shadow); animation: rise .16s ease-out; }
@@ -203,10 +204,11 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     <div class="confirm" hidden role="alertdialog" aria-modal="true" aria-labelledby="cgx-confirm-title">
       <div class="confirm-box">
         <h3 id="cgx-confirm-title">Delete conversations?</h3>
+        <p class="note" hidden></p>
         <p class="warn"><strong>They are removed from your ChatGPT account, not archived, and cannot be restored.</strong> OpenAI then deletes them permanently within 30 days.</p>
         <ul class="preview"></ul>
-        <label class="opt"><input class="backup" type="checkbox" checked><span><strong>Export a backup first</strong> (recommended)<br><small>Uses the format chosen below the list. A conversation is only deleted if its export succeeded.</small></span></label>
-        <label class="opt"><input class="ack" type="checkbox"><span>I understand that deleted conversations cannot be restored.</span></label>
+        <label class="opt backup-row"><input class="backup" type="checkbox" checked><span><strong>Export a backup first</strong> (recommended)<br><small>Exports in the format chosen below the list. Nothing is deleted yet: once the download is done, you check the file and confirm the deletion in a second step.</small></span></label>
+        <label class="opt ack-row"><input class="ack" type="checkbox"><span>I understand that deleted conversations cannot be restored.</span></label>
         <div class="confirm-actions"><button class="ghost no" type="button">Cancel</button><button class="danger yes" type="button" disabled>Delete</button></div>
       </div>
     </div>
@@ -264,7 +266,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       list: q(".list"), rows: q(".rows"), empty: q(".empty"), more: q(".more"),
       idle: [...root.querySelectorAll(".idle-only")], count: q(".count"), format: q(".format"), del: q(".delete"), exp: q(".export"),
       run: q(".run"), runLabel: q(".run .run-label"), runBar: q(".run .bar"), hide: q(".hide"), cancel: q(".cancel"),
-      confirm: q(".confirm"), confirmTitle: q("#cgx-confirm-title"), preview: q(".preview"), backup: q(".backup"), ack: q(".ack"), no: q(".no"), yes: q(".yes")
+      confirm: q(".confirm"), confirmTitle: q("#cgx-confirm-title"), note: q(".note"), warn: q(".warn"), preview: q(".preview"),
+      backupRow: q(".backup-row"), backup: q(".backup"), ackRow: q(".ack-row"), ack: q(".ack"), no: q(".no"), yes: q(".yes")
     };
 
     // Keep ChatGPT's global shortcuts (which focus its composer) from
@@ -292,8 +295,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     });
     el.bannerClose.addEventListener("click", () => { el.banner.hidden = true; });
     el.format.addEventListener("change", () => { format = el.format.value; updateFooter(); });
-    el.exp.addEventListener("click", () => runActions("export"));
-    el.del.addEventListener("click", openConfirm);
+    el.exp.addEventListener("click", () => runExport([...selected], false));
+    el.del.addEventListener("click", () => openConfirm("choose", [...selected]));
     el.cancel.addEventListener("click", () => {
       el.cancel.disabled = true;
       el.cancel.textContent = "Cancelling…";
@@ -303,9 +306,12 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     el.backup.addEventListener("change", updateConfirm);
     el.ack.addEventListener("change", updateConfirm);
     el.yes.addEventListener("click", () => {
+      if (!confirmState) return;
+      const { mode, keys } = confirmState;
+      if (mode === "choose" && el.backup.checked) { closeConfirm(); runExport(keys, true); return; }
       if (!el.ack.checked) return;
       closeConfirm();
-      runActions(el.backup.checked ? "export-delete" : "delete");
+      runDelete(keys);
     });
 
     el.list.addEventListener("scroll", () => {
@@ -631,14 +637,28 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     return formats[format] || { format, md: format !== "html", html: format === "html" || format === "both" };
   }
 
-  function openConfirm() {
-    const n = selected.size;
-    if (!n) return;
-    el.confirmTitle.textContent = `Delete ${plural(n, "conversation")}?`;
+  // Deletion is always a separate, explicit decision:
+  // - "choose": opened from Delete…. With "Export a backup first" ticked it
+  //   only exports; nothing is deleted at that stage.
+  // - "after-export": offered once an export finished. It lists only the
+  //   conversations that were exported successfully, and the user confirms
+  //   after checking the downloaded file. Browsers can block or cancel a
+  //   download without the page knowing, so we never delete automatically.
+  let confirmState = null;
+
+  function openConfirm(mode, keys, exportInfo = "") {
+    const chosen = items.filter((item) => keys.includes(item.key));
+    if (!chosen.length || phase !== "idle") return;
+    confirmState = { mode, keys: chosen.map((item) => item.key) };
     el.preview.replaceChildren();
-    const chosen = items.filter((item) => selected.has(item.key));
     for (const item of chosen.slice(0, 8)) { const li = document.createElement("li"); li.textContent = item.title; el.preview.appendChild(li); }
     if (chosen.length > 8) { const li = document.createElement("li"); li.textContent = `…and ${fmtNumber(chosen.length - 8)} more`; el.preview.appendChild(li); }
+    const shown = new Set(filtered.map((item) => item.key));
+    const hidden = chosen.filter((item) => !shown.has(item.key)).length;
+    if (hidden && mode === "choose") { const li = document.createElement("li"); li.textContent = `Including ${plural(hidden, "conversation")} hidden by your current filters.`; li.style.fontWeight = "600"; el.preview.appendChild(li); }
+    el.note.hidden = mode !== "after-export";
+    el.note.textContent = exportInfo;
+    el.backupRow.hidden = mode !== "choose";
     el.backup.checked = true;
     el.ack.checked = false;
     updateConfirm();
@@ -647,79 +667,98 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   }
 
   function updateConfirm() {
-    const n = selected.size;
-    el.yes.disabled = !el.ack.checked;
-    el.yes.textContent = el.backup.checked ? `Export, then delete ${fmtNumber(n)}` : `Delete ${fmtNumber(n)} permanently`;
+    if (!confirmState) return;
+    const n = confirmState.keys.length;
+    const exportFirst = confirmState.mode === "choose" && el.backup.checked;
+    el.confirmTitle.textContent = exportFirst ? `Back up ${plural(n, "conversation")} before deleting` : `Delete ${plural(n, "conversation")} from ChatGPT?`;
+    el.warn.hidden = exportFirst;
+    el.ackRow.hidden = exportFirst;
+    el.yes.className = exportFirst ? "primary yes" : "danger yes";
+    el.yes.disabled = !exportFirst && !el.ack.checked;
+    el.yes.textContent = exportFirst ? `Export ${fmtNumber(n)} as ${FORMAT_LABELS[format]}` : `Delete ${fmtNumber(n)} permanently`;
   }
 
   function closeConfirm() {
     el.confirm.hidden = true;
+    confirmState = null;
     el.del.focus();
   }
 
-  async function runActions(action) {
+  async function runJob(actions) {
     const core = globalThis.CGX_core;
-    const keys = [...selected];
-    if (!keys.length || phase !== "idle" || !listComplete) return;
-    if (core.isBusy()) { showBanner("Another export is already running in this tab. Wait for it to finish.", "error"); return; }
+    if (!actions.length || phase !== "idle" || !listComplete) return null;
+    if (core.isBusy()) { showBanner("Another export is already running in this tab. Wait for it to finish.", "error"); return null; }
     el.banner.hidden = true;
     setPhase("running");
     el.hide.focus();
-    const result = await core.runActions(keys.map((key) => ({ key, action })), exportOptions());
+    const result = await core.runActions(actions, exportOptions());
     setPhase("idle");
     if (!result.ok) {
       if (result.cancelled) showBanner("Cancelled. Nothing else will be exported or deleted.", "");
       else if (/load the conversation list again/i.test(result.error || "")) showBanner("The conversation list is out of date.", "error", "Refresh list", () => load(true));
       else showBanner(`Something went wrong: ${result.error || "unknown error"}`, "error");
       finish(result.cancelled ? "Cancelled." : "Something went wrong. Open to see why.");
-      return;
+      return null;
     }
-    const problem = summarize(action, result);
-    finish(problem ? "Done, with some problems. Open to see details." : "Done. Open to see the summary.");
+    return result;
   }
 
-  function summarize(action, result) {
+  async function runExport(keys, thenAskToDelete) {
+    const result = await runJob(keys.map((key) => ({ key, action: "export" })));
+    if (!result) return;
+    const exp = result.exportResult;
     const lines = [];
     let problem = false;
-    const exp = result.exportResult;
-    if (action !== "delete") {
-      if (exp) {
-        const target = exp.joplinHistory || exp.joplin ? "Import the downloaded .jex file into Joplin (File › Import › JEX)." : "Check your browser’s downloads.";
-        lines.push(`${plural(exp.count || 0, "conversation")} exported as ${FORMAT_LABELS[format]}. ${target}`);
-        if (exp.failed) { problem = true; lines.push(`${plural(exp.failed, "conversation")} could not be exported (see the _erreurs.txt file in the archive).`); }
-        if (exp.imageFailures) lines.push(`${plural(exp.imageFailures, "image")} could not be downloaded and stayed as links.`);
-        if (exp.fileFailures) lines.push(`${plural(exp.fileFailures, "file")} could not be downloaded.`);
-      } else if (result.exportError) {
-        problem = true;
-        lines.push(`Export did not complete: ${result.exportError}`);
-      }
+    let exportedKeys = [];
+    if (exp) {
+      const failed = new Set((exp.failedIds || []).map((entry) => JSON.stringify([entry.accountId || "", entry.id || ""])));
+      exportedKeys = keys.filter((key) => !failed.has(key));
+      const target = exp.joplinHistory || exp.joplin ? "Import the downloaded .jex file into Joplin (File › Import › JEX)." : "Check your browser’s downloads.";
+      lines.push(`${plural(exportedKeys.length, "conversation")} exported as ${FORMAT_LABELS[format]}. ${target}`);
+      if (exp.failed) { problem = true; lines.push(`${plural(exp.failed, "conversation")} could not be exported (see the _erreurs.txt file in the archive). They will not be offered for deletion.`); }
+      if (exp.imageFailures) lines.push(`${plural(exp.imageFailures, "image")} could not be downloaded and stayed as links.`);
+      if (exp.fileFailures) lines.push(`${plural(exp.fileFailures, "file")} could not be downloaded.`);
+    } else {
+      problem = true;
+      lines.push(`Export did not complete${result.exportError ? `: ${result.exportError}` : "."} Nothing can be deleted.`);
     }
-    const deletes = result.deleteResults || [];
-    if (deletes.length) {
-      const ok = deletes.filter((entry) => entry.ok);
-      const failed = deletes.filter((entry) => !entry.ok);
-      lines.push(`${plural(ok.length, "conversation")} permanently deleted.`);
-      if (failed.length) {
-        problem = true;
-        const names = failed.slice(0, 3).map((entry) => `“${entry.title}”`).join(", ");
-        lines.push(`${plural(failed.length, "conversation")} kept: ${names}${failed.length > 3 ? "…" : ""} (${failed[0].error || "deletion failed"}).`);
-      }
-      const removed = new Set(ok.map((entry) => entry.key));
-      items = items.filter((item) => !removed.has(item.key));
-      for (const key of removed) selected.delete(key);
-      applyFilters();
+    const offerDelete = () => openConfirm("after-export", exportedKeys,
+      `${lines[0]}\nOpen the downloaded file and make sure it is complete before deleting. Only the conversations exported successfully are listed below.`);
+    showBanner(lines.join("\n"), problem ? "error" : "ok", exportedKeys.length ? `Delete these ${fmtNumber(exportedKeys.length)} from ChatGPT…` : "", exportedKeys.length ? offerDelete : null, true);
+    if (thenAskToDelete && exportedKeys.length) {
+      if (open) offerDelete();
+      else finish("Backup exported. Open to confirm the deletion.");
+      return;
     }
-    showBanner(lines.join("\n"), problem ? "error" : "ok");
-    return problem;
+    finish(problem ? "Export done, with some problems. Open to see details." : "Export done. Open to see the summary.");
   }
 
-  function showBanner(text, tone = "", actionLabel = "", action = null) {
+  async function runDelete(keys) {
+    const result = await runJob(keys.map((key) => ({ key, action: "delete" })));
+    if (!result) return;
+    const deletes = result.deleteResults || [];
+    const ok = deletes.filter((entry) => entry.ok);
+    const failed = deletes.filter((entry) => !entry.ok);
+    const lines = [`${plural(ok.length, "conversation")} permanently deleted.`];
+    if (failed.length) {
+      const names = failed.slice(0, 3).map((entry) => `“${entry.title}”`).join(", ");
+      lines.push(`${plural(failed.length, "conversation")} kept: ${names}${failed.length > 3 ? "…" : ""} (${failed[0].error || "deletion failed"}).`);
+    }
+    const removed = new Set(ok.map((entry) => entry.key));
+    items = items.filter((item) => !removed.has(item.key));
+    for (const key of removed) selected.delete(key);
+    applyFilters(true);
+    showBanner(lines.join("\n"), failed.length ? "error" : "ok");
+    finish(failed.length ? "Deletion done, with some problems. Open to see details." : "Deletion done.");
+  }
+
+  function showBanner(text, tone = "", actionLabel = "", action = null, keepOpen = false) {
     el.banner.className = `banner${tone ? ` ${tone}` : ""}`;
     el.banner.setAttribute("role", tone === "error" ? "alert" : "status");
     el.bannerMsg.textContent = text;
     el.bannerAction.hidden = !action;
     el.bannerAction.textContent = actionLabel;
-    el.bannerAction.onclick = action ? () => { el.banner.hidden = true; action(); } : null;
+    el.bannerAction.onclick = action ? () => { if (!keepOpen) el.banner.hidden = true; action(); } : null;
     el.banner.hidden = false;
   }
 

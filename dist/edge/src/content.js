@@ -169,7 +169,8 @@
     const headers = {Accept:'*/*'};
     if (session.accessToken) headers.Authorization = `Bearer ${session.accessToken}`;
     if (accountId) headers['ChatGPT-Account-ID'] = accountId;
-    const requestOptions={credentials:'include',cache:'no-store',headers,...fetchOptions,signal:jobAbortController?jobAbortController.signal:fetchOptions.signal};
+    Object.assign(headers, fetchOptions.headers || {});
+    const requestOptions={credentials:'include',cache:'no-store',...fetchOptions,headers,signal:jobAbortController?jobAbortController.signal:fetchOptions.signal};
     let res = await pageFetch(url, requestOptions);
     checkCancelled();
     if (res.status === 429) {
@@ -1048,10 +1049,19 @@
     return{items,total:items.length};
   }
   async function deleteConversationPermanently(item){
-    const id=item.conversation_id||item.id;
-    if(!id)throw new Error('Conversation identifier is missing.');
-    const response=await authFetch(`/backend-api/conversation/${encodeURIComponent(id)}`,0,item._cgxAccountId||null,false,{method:'DELETE'});
-    if(!response.ok){const error=new Error(`HTTP ${response.status} while permanently deleting conversation.`);error.status=response.status;throw error;}
+    // A shared-link entry without conversation_id only carries the share id;
+    // never send that to the conversation endpoint.
+    const id=item.conversation_id||(item._cgxShared?null:item.id);
+    if(!id)throw new Error('Only a shared link is known for this conversation; delete it from ChatGPT directly.');
+    const url=`/backend-api/conversation/${encodeURIComponent(id)}`;
+    const attempt=async init=>{try{await authFetch(url,0,item._cgxAccountId||null,false,init);return null;}catch(error){checkCancelled();return error;}};
+    let error=await attempt({method:'DELETE'});
+    // The web app deletes chats with PATCH {is_visible:false}; use it when
+    // the endpoint does not accept DELETE.
+    if(error&&(error.status===405||error.status===400)){
+      error=await attempt({method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({is_visible:false})});
+    }
+    if(error){const failure=new Error(error.status?`HTTP ${error.status} while permanently deleting conversation.`:String(error.message||error));failure.status=error.status||null;throw failure;}
     return true;
   }
   function defaultExportOptions(options={}){
