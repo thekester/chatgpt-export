@@ -35,6 +35,7 @@
     td select { min-width:185px; width:100%; }
     .pagination,.runbar { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:12px; }
     .pagination .buttons { display:flex; gap:7px; }
+    .runbar .buttons { display:flex; gap:8px; flex-wrap:wrap; }
     .runbar { position:sticky; bottom:0; padding:12px 0; background:var(--bg); }
     .runbar p { margin:0; color:var(--muted); }
     #status { min-height:25px; margin:8px 0; color:var(--muted); }
@@ -53,7 +54,7 @@
 <body>
   <main>
     <div class="top"><h1>Manage conversations</h1><button id="reload" type="button">Reload list</button></div>
-    <p class="intro">Choose an action for each conversation. Export, permanent deletion, and export-then-delete are independent row actions.</p>
+    <p class="intro">Select conversations with the checkboxes, then choose an action below. You can select all conversations on the current page at once.</p>
     <p id="status" role="status">Connecting to the ChatGPT tab…</p>
     <progress id="progress" max="100" value="0" hidden></progress>
     <div class="toolbar">
@@ -64,21 +65,16 @@
       </select>
       <label class="date-filter">From <input id="date-from" type="date" aria-label="Updated from date"></label>
       <label class="date-filter">To <input id="date-to" type="date" aria-label="Updated to date"></label>
-      <select id="bulk-action" aria-label="Action for checked rows">
-        <option value="">Set action for checked rows…</option>
-        <option value="none">Leave unchanged</option><option value="export">Export</option>
-        <option value="delete">Delete permanently</option><option value="export-delete">Export, then delete</option>
-      </select>
       <span id="counts" class="muted">No conversations loaded</span>
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th><input id="select-visible" type="checkbox" aria-label="Select visible rows"></th><th>Conversation</th><th>Updated</th><th>Location</th><th>Action</th></tr></thead>
-        <tbody id="rows"><tr><td colspan="5" class="muted">Conversation list will appear here.</td></tr></tbody>
+        <thead><tr><th><input id="select-visible" type="checkbox" aria-label="Select visible rows"></th><th>Conversation</th><th>Updated</th><th>Location</th></tr></thead>
+        <tbody id="rows"><tr><td colspan="4" class="muted">Conversation list will appear here.</td></tr></tbody>
       </table>
     </div>
     <div class="pagination"><span id="page-label" class="muted"></span><div class="buttons"><button id="previous" type="button">Previous</button><button id="next" type="button">Next</button></div></div>
-    <div class="runbar"><p id="selection-summary">No actions selected.</p><button id="run-actions" class="primary" type="button" disabled>Run selected actions</button></div>
+    <div class="runbar"><p id="selection-summary">No conversations selected.</p><div class="buttons"><button id="export-selected" class="primary" type="button" disabled>Export selected</button><button id="delete-selected" class="danger" type="button" disabled>Delete selected</button><button id="export-delete-selected" type="button" disabled>Export, then delete</button></div></div>
   </main>
   <dialog id="delete-dialog">
     <h2>Confirm permanent deletion</h2>

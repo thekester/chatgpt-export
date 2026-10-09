@@ -35,16 +35,6 @@ function visibleItems() {
   return filtered;
 }
 
-function actionCounts() {
-  const counts = { export: 0, delete: 0, combined: 0 };
-  for (const action of actions.values()) {
-    if (action === "export") counts.export++;
-    else if (action === "delete") counts.delete++;
-    else if (action === "export-delete") counts.combined++;
-  }
-  return counts;
-}
-
 function render() {
   const filtered = visibleItems();
   const pages = Math.max(1, Math.ceil(filtered.length / pageSize));
@@ -54,7 +44,7 @@ function render() {
   tbody.replaceChildren();
   if (!pageItems.length) {
     const row = document.createElement("tr"), cell = document.createElement("td");
-    cell.colSpan = 5; cell.className = "muted"; cell.textContent = items.length ? "No conversations match these search and date filters." : "No conversations loaded.";
+    cell.colSpan = 4; cell.className = "muted"; cell.textContent = items.length ? "No conversations match these search and date filters." : "No conversations loaded yet. The account history is still being scanned.";
     row.appendChild(cell); tbody.appendChild(row);
   }
   for (const item of pageItems) {
@@ -69,15 +59,7 @@ function render() {
     date.textContent = item.updatedAt ? new Date(item.updatedAt).toLocaleString() : "Unknown";
     const scope = document.createElement("td"); scope.className = "scope";
     scope.textContent = [item.accountLabel || "", item.project || "", item.archived ? "Archived" : "", item.shared ? "Shared" : ""].filter(Boolean).join(" · ") || "Active";
-    const actionCell = document.createElement("td"), select = document.createElement("select");
-    select.disabled = running;
-    select.setAttribute("aria-label", `Action for ${item.title}`);
-    const choices = [["none", "Do nothing"], ["export", "Export"], ["delete", "Delete permanently"], ["export-delete", "Export, then delete"]];
-    for (const [value, label] of choices) { const option = document.createElement("option"); option.value = value; option.textContent = label; select.appendChild(option); }
-    select.value = actions.get(item.key) || "none";
-    select.addEventListener("change", () => { select.value === "none" ? actions.delete(item.key) : actions.set(item.key, select.value); updateSummary(); });
-    actionCell.appendChild(select);
-    row.append(markCell, title, date, scope, actionCell); tbody.appendChild(row);
+    row.append(markCell, title, date, scope); tbody.appendChild(row);
   }
   $("counts").textContent = `${filtered.length.toLocaleString()} shown of ${items.length.toLocaleString()} · ${selectedRows.size.toLocaleString()} checked`;
   $("page-label").textContent = `Page ${currentPage + 1} of ${pages}`;
@@ -88,7 +70,6 @@ function render() {
   $("sort-by").disabled = running;
   $("date-from").disabled = running;
   $("date-to").disabled = running;
-  $("bulk-action").disabled = running;
   $("select-visible").disabled = running;
   updateVisibleCheckbox(); updateSummary();
 }
@@ -102,14 +83,11 @@ function updateVisibleCheckbox() {
 }
 
 function updateSummary() {
-  const counts = actionCounts();
-  const chunks = [];
-  if (counts.export) chunks.push(`${counts.export} export`);
-  if (counts.delete) chunks.push(`${counts.delete} permanent delete`);
-  if (counts.combined) chunks.push(`${counts.combined} export then delete`);
-  $("selection-summary").textContent = chunks.length ? chunks.join(" · ") : "No actions selected.";
-  $("run-actions").disabled = running || !chunks.length;
-  $("run-actions").textContent = running ? "Working…" : "Run selected actions";
+  const count = selectedRows.size;
+  $("selection-summary").textContent = count ? `${count.toLocaleString()} conversation(s) selected. Choose what to do:` : "Select conversations using the checkboxes.";
+  $("export-selected").disabled = running || !count;
+  $("delete-selected").disabled = running || !count;
+  $("export-delete-selected").disabled = running || !count;
 }
 
 async function sendToChatGPT(message) {
@@ -149,8 +127,10 @@ function makeExportOptions() {
   };
 }
 
-function reviewActions() {
-  const planned = [...actions].map(([key, action]) => ({ item: items.find((entry) => entry.key === key), action })).filter((entry) => entry.item);
+function reviewActions(action) {
+  const planned = [...selectedRows].map((key) => ({ item: items.find((entry) => entry.key === key), action })).filter((entry) => entry.item);
+  actions.clear();
+  for (const { item } of planned) actions.set(item.key, action);
   const deletes = planned.filter(({ action }) => action === "delete" || action === "export-delete");
   if (!deletes.length) { runActions(planned); return; }
   $("delete-summary").textContent = `${deletes.length} conversation(s) are marked for permanent deletion. ${planned.filter(({ action }) => action === "export" || action === "export-delete").length} will be exported first.`;
@@ -207,12 +187,9 @@ $("select-visible").addEventListener("change", (event) => {
   for (const item of visible) event.target.checked ? selectedRows.add(item.key) : selectedRows.delete(item.key);
   render();
 });
-$("bulk-action").addEventListener("change", (event) => {
-  if (!event.target.value) return;
-  for (const key of selectedRows) event.target.value === "none" ? actions.delete(key) : actions.set(key, event.target.value);
-  event.target.value = ""; render();
-});
-$("run-actions").addEventListener("click", reviewActions);
+$("export-selected").addEventListener("click", () => reviewActions("export"));
+$("delete-selected").addEventListener("click", () => reviewActions("delete"));
+$("export-delete-selected").addEventListener("click", () => reviewActions("export-delete"));
 $("delete-ack").addEventListener("change", (event) => { $("confirm-delete").disabled = !event.target.checked; });
 $("cancel-delete").addEventListener("click", () => $("delete-dialog").close());
 $("confirm-delete").addEventListener("click", () => {
