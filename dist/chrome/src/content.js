@@ -770,7 +770,7 @@
 
   async function pagedOffset(pathBuilder, accountId,onPage=()=>{},maxItems=Infinity){
     const out=[];let offset=0,total=Infinity;
-    while(offset<total&&out.length<maxItems){checkCancelled();const page=await apiGet(pathBuilder(offset),accountId);checkCancelled();const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch.slice(0,Math.max(0,maxItems-out.length)));total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total);if(out.length>=maxItems||batch.length<PAGE_SIZE&&total===Infinity)break;await jobSleep(DELAY_MS);}return out;
+    while(offset<total&&out.length<maxItems){checkCancelled();const page=await apiGet(pathBuilder(offset),accountId);checkCancelled();const batch=page.items||page.conversations||[];if(!batch.length)break;out.push(...batch.slice(0,Math.max(0,maxItems-out.length)));total=typeof page.total==='number'?page.total:Infinity;offset+=batch.length;onPage(out.length,batch.length,total,batch);if(out.length>=maxItems||batch.length<PAGE_SIZE&&total===Infinity)break;await jobSleep(DELAY_MS);}return out;
   }
 
   async function listProjects(accountId){
@@ -797,11 +797,11 @@
   async function listProjectConversations(project,accountId,onCount=()=>{}){
     const projectId=typeof project==='string'?project:(project.id||project.gizmo_id||project.project_id);
     const preview=(project && project._cgxSidebarItem && (project._cgxSidebarItem.conversations||project._cgxSidebarItem.items)) || project.conversations || [];
-    const out=[...preview]; let cursor='0'; let fetched=false;onCount(out.length);
+    const out=[...preview]; let cursor='0'; let fetched=false;if(out.length)onCount(out.length,out);
     while(cursor!=null){
       checkCancelled();
       const r=await tryApiGet(`/backend-api/gizmos/${encodeURIComponent(projectId)}/conversations?cursor=${encodeURIComponent(cursor)}`,accountId,'project_conversations');
-      if(!r.ok) break; fetched=true; const data=r.data; out.push(...(data.items||data.conversations||[]));onCount(out.length); cursor=data.cursor||data.next_cursor||null;if(cursor)await jobSleep(DELAY_MS);
+      if(!r.ok) break; fetched=true; const data=r.data; const batch=data.items||data.conversations||[];out.push(...batch);if(batch.length)onCount(out.length,batch); cursor=data.cursor||data.next_cursor||null;if(cursor)await jobSleep(DELAY_MS);
     }
     const seen=new Map(); for(const x of out){const id=x&& (x.conversation_id||x.id);if(id)seen.set(id,x);} 
     if(!fetched && preview.length) setCapability('project_conversations','fallback','Using previews available in the Projects sidebar.');
@@ -809,23 +809,23 @@
   }
 
   async function listShared(accountId,onCount=()=>{}){
-    try{const xs=await pagedOffset(o=>`/backend-api/shared_conversations?offset=${o}&limit=${PAGE_SIZE}&order=created`,accountId,n=>onCount(n));setCapability('shared_list','available');return xs;}
+    try{const xs=await pagedOffset(o=>`/backend-api/shared_conversations?offset=${o}&limit=${PAGE_SIZE}&order=created`,accountId,(n,_size,_total,batch)=>onCount(n,batch));setCapability('shared_list','available');return xs;}
     catch(e){
       checkCancelled();
       const r=await tryApiGet('/backend-api/shared_conversations?order=created',accountId,'shared_list');
-      if(r.ok){const xs=r.data.items||r.data.conversations||[];onCount(xs.length);return xs;}
+      if(r.ok){const xs=r.data.items||r.data.conversations||[];if(xs.length)onCount(xs.length,xs);return xs;}
       return[];
     }
   }
 
   async function listRegular(accountId, archived=false,onCount=()=>{},maxItems=Infinity){
     try {
-      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,n=>onCount(n),maxItems);
+      const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated&is_archived=${archived}`,accountId,(n,_size,_total,batch)=>onCount(n,batch),maxItems);
       setCapability(archived?'archived_list':'conversation_list','available'); return xs;
     } catch(e) {
       checkCancelled();
       if(!archived){
-        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,n=>onCount(n),maxItems); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ setCapability('conversation_list','unavailable',e2.message); }
+        try { const xs=await pagedOffset(o=>`/backend-api/conversations?offset=${o}&limit=${PAGE_SIZE}&order=updated`,accountId,(n,_size,_total,batch)=>onCount(n,batch),maxItems); setCapability('conversation_list','fallback','Endpoint sans is_archived.'); return xs; } catch(e2){ checkCancelled();setCapability('conversation_list','unavailable',e2.message); }
       } else setCapability('archived_list','unavailable',e.message);
       return [];
     }
@@ -833,7 +833,7 @@
 
   function timeMs(v){if(v==null)return 0;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:0;}
 
-  async function listAll(opts,onProgress=()=>{}){
+  async function listAll(opts,onProgress=()=>{},onItems=()=>{}){
     const startedAt=Date.now(); let stage='Connecting to the account…';
     const found=[]; const projectsIndex=[];let observed=0;
     const elapsed=()=>{const s=Math.floor((Date.now()-startedAt)/1000);return s>=60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;};
@@ -848,7 +848,7 @@
           checkCancelled();
           const accountId=accounts[accountNo],accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
           stage=`${accountLabel}scanning recent active conversations (up to ${limit})`;announce();
-          const active=await listRegular(accountId,false,count=>announce(found.length+count),limit);
+          const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));},limit);
           for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});
         }
         const byKey=new Map();
@@ -861,9 +861,9 @@
         checkCancelled();
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
-        const active=await listRegular(accountId,false,count=>announce(found.length+count)); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
+        const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));}); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}scanning archived conversations`;announce();
-        const archived=await listRegular(accountId,true,count=>announce(found.length+count)); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});announce();
+        const archived=await listRegular(accountId,true,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:true,_cgxAccountId:accountId})));}); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}finding projects`;announce();
         try{
           const projects=await listProjects(accountId);
@@ -871,13 +871,13 @@
             const p=projects[projectNo],pid=p.id||p.gizmo_id||p.project_id;if(!pid)continue;
             const pname=(p.display&&p.display.name)||p.name||p.title||'Project';
             stage=`${accountLabel}scanning project ${projectNo+1}/${projects.length}`;announce();
-            let xs=[];try{xs=await listProjectConversations(p,accountId,count=>announce(found.length+count));}catch(e){checkCancelled();setCapability('project_conversations','unavailable',e.message);}
+            let xs=[];try{xs=await listProjectConversations(p,accountId,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId})));});}catch(e){checkCancelled();setCapability('project_conversations','unavailable',e.message);}
             projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
             for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
           }
         }catch(e){checkCancelled();}
         stage=`${accountLabel}scanning shared conversations`;announce();
-        for(const sh of await listShared(accountId,count=>announce(found.length+count))) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});announce();
+        for(const sh of await listShared(accountId,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxShared:true,_cgxShareId:x.share_id||x.id,_cgxAccountId:accountId})));})) found.push({...sh,_cgxShared:true,_cgxShareId:sh.share_id||sh.id,_cgxAccountId:accountId});announce();
       }
       stage='Removing duplicates and preparing the export';announce();
       checkCancelled();
@@ -1035,8 +1035,13 @@
     const accountId=item._cgxAccountId||null;
     return{key:managerItemKey(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
   }
+  function publishPickerItems(rawItems){
+    if(!rawItems||!rawItems.length)return;
+    const state={...(progressState||{}),items:rawItems.map(managerSummary)};
+    for(const listener of progressListeners){try{listener(state);}catch(_){}}
+  }
   async function managerList(){
-    const listed=await listAll({conversationLimit:0},label=>progressPercent(1,label));
+    const listed=await listAll({conversationLimit:0},label=>progressPercent(1,label),publishPickerItems);
     managerListCache=listed;
     progressPercent(100,`${listed.items.length} conversations ready to manage.`,listed.items.length,listed.items.length);
     const items=listed.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt);

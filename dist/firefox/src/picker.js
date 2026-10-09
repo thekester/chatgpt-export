@@ -215,6 +215,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 
   let host = null, root = null, el = {};
   let items = [], filtered = [], rendered = 0;
+  let listComplete = false;
   const selected = new Set();
   let formats = {}, format = "both";
   let phase = "idle"; // idle | loading | running
@@ -360,35 +361,41 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   async function load(force = false) {
     const core = globalThis.CGX_core;
     if (phase !== "idle") return;
-    if (!force && items.length) { applyFilters(); return; }
-    if (!force && core.hasCachedList()) { items = core.cachedItems() || []; applyFilters(); return; }
+    if (!force && items.length && listComplete) { applyFilters(); return; }
+    if (!force && core.hasCachedList()) { items = core.cachedItems() || []; listComplete = true; applyFilters(); return; }
     if (core.isBusy()) {
       showBanner("Another export is running in this tab. Wait for it to finish, then try again.", "error", "Try again", () => load(force));
       renderEmpty("Busy", "An export started from the extension popup is still running.");
       return;
     }
+    listComplete = false;
     setPhase("loading");
     el.banner.hidden = true;
     renderEmpty("loading", "Scanning your ChatGPT history…", "Large histories can take a minute. Archived, project and shared conversations are included.");
     const result = await core.listConversations();
-    setPhase("idle");
     if (!result.ok) {
+      setPhase("idle");
       const cancelled = result.cancelled;
-      showBanner(cancelled ? "Scan cancelled." : `Could not load your conversations: ${result.error || "unknown error"}`, cancelled ? "" : "error", "Try again", () => load(true));
-      renderEmpty(cancelled ? "Scan cancelled" : "Nothing to show", cancelled ? "Click Refresh to scan again." : "Reload the ChatGPT tab if this keeps happening.");
+      showBanner(cancelled ? "Scan cancelled. Partial results remain visible; refresh to complete the list." : `Could not load your conversations: ${result.error || "unknown error"}`, cancelled ? "" : "error", "Try again", () => load(true));
+      if (items.length) applyFilters(true);
+      else renderEmpty(cancelled ? "Scan cancelled" : "Nothing to show", cancelled ? "Click Refresh to scan again." : "Reload the ChatGPT tab if this keeps happening.");
       finish(cancelled ? "Scan cancelled." : "Scan failed. Open to see why.");
       return;
     }
     items = result.items || [];
+    listComplete = true;
     const known = new Set(items.map((item) => item.key));
     for (const key of [...selected]) if (!known.has(key)) selected.delete(key);
-    applyFilters();
+    setPhase("idle");
+    applyFilters(true);
     finish(`${plural(items.length, "conversation")} ready to pick.`);
   }
 
   // ---------- Filtering & rendering ----------
 
-  function applyFilters() {
+  function applyFilters(preservePosition = false) {
+    const oldScrollTop = preservePosition ? el.list.scrollTop : 0;
+    const oldRendered = preservePosition ? rendered : 0;
     const query = el.search.value.trim().toLocaleLowerCase();
     let from = -Infinity, to = Infinity;
     if (el.period.value === "custom") {
@@ -421,7 +428,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     el.views.forEach((button) => button.setAttribute("aria-pressed", String(button.dataset.view === view)));
     el.rows.replaceChildren();
     rendered = 0;
-    el.list.scrollTop = 0;
+    el.list.scrollTop = oldScrollTop;
     if (!filtered.length) {
       if (!items.length) renderEmpty("No conversations found", "This account has no conversations to export.");
       else if (view === "selected") renderEmpty("Nothing selected yet", "Switch back to All and tick the conversations you want.");
@@ -429,6 +436,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     } else {
       el.empty.hidden = true;
       renderMore();
+      while (rendered < Math.min(filtered.length, Math.max(oldRendered, CHUNK))) renderMore();
     }
     paintSelection();
   }
@@ -487,12 +495,12 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     rendered = Math.min(filtered.length, rendered + CHUNK);
     el.rows.appendChild(fragment);
     el.more.hidden = rendered >= filtered.length;
-    el.more.textContent = `Showing ${fmtNumber(rendered)} of ${fmtNumber(filtered.length)} — scroll for more`;
+    el.more.textContent = `Showing ${fmtNumber(rendered)} of ${fmtNumber(filtered.length)}${!listComplete ? " loaded so far" : ""} — scroll for more`;
     paintRows();
   }
 
   function onRowClick(event) {
-    if (phase !== "idle" || event.target.closest("a")) return;
+    if (phase === "running" || event.target.closest("a")) return;
     const row = event.target.closest(".row");
     if (!row) return;
     const key = row.dataset.key;
@@ -515,7 +523,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       const on = selected.has(row.dataset.key);
       row.classList.toggle("on", on);
       row.firstChild.checked = on;
-      row.firstChild.disabled = phase !== "idle";
+      row.firstChild.disabled = phase === "running";
     }
   }
 
@@ -524,7 +532,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     const shownSelected = filtered.reduce((n, item) => n + (selected.has(item.key) ? 1 : 0), 0);
     el.all.checked = filtered.length > 0 && shownSelected === filtered.length;
     el.all.indeterminate = shownSelected > 0 && shownSelected < filtered.length;
-    el.all.disabled = !filtered.length || phase !== "idle";
+    el.all.disabled = !filtered.length || phase === "running";
     const filteredOut = filtered.length !== items.length && view === "all";
     el.allLabel.textContent = !filtered.length ? "Select all" : `Select all ${fmtNumber(filtered.length)}${filteredOut ? " shown" : ""}`;
     el.selInfo.replaceChildren();
@@ -534,7 +542,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       clear.type = "button"; clear.className = "link clear"; clear.textContent = "Clear";
       el.selInfo.appendChild(clear);
     } else if (items.length) {
-      el.selInfo.textContent = `${plural(items.length, "conversation")} in total · Shift-click to select a range`;
+      el.selInfo.textContent = `${plural(items.length, "conversation")}${!listComplete ? phase === "loading" ? " loaded so far · scanning more…" : " loaded so far · scan incomplete" : " in total · Shift-click to select a range"}`;
     }
     el.views[1].textContent = selected.size ? `Selected (${fmtNumber(selected.size)})` : "Selected";
     updateFooter();
@@ -550,18 +558,20 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       small.textContent = ` (${fmtNumber(hidden)} hidden by filters)`;
       el.count.appendChild(small);
     }
-    el.exp.disabled = !n || phase !== "idle";
-    el.del.disabled = !n || phase !== "idle";
+    el.exp.disabled = !n || phase !== "idle" || !listComplete;
+    el.del.disabled = !n || phase !== "idle" || !listComplete;
     el.exp.querySelector("span").textContent = n ? `Export ${plural(n, "conversation")}` : "Export";
     el.exp.title = n ? `Download as ${FORMAT_LABELS[format]}` : "Tick at least one conversation first";
   }
 
   function setPhase(next) {
     phase = next;
-    const locked = phase !== "idle";
+    const locked = phase === "running";
     for (const node of [el.toolbar, el.selbar]) node.toggleAttribute("inert", locked);
-    el.idle.forEach((node) => { node.hidden = locked; });
+    el.idle.forEach((node) => { node.hidden = phase !== "idle"; });
     el.run.hidden = !locked;
+    if (phase === "loading") el.run.hidden = false;
+    el.refresh.disabled = phase !== "idle";
     el.cancel.disabled = false;
     el.cancel.textContent = "Cancel";
     if (phase === "running") setProgress(0, "Starting…");
@@ -593,8 +603,26 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 
   function onProgress(state) {
     if (!state) return;
+    if (phase === "loading" && Array.isArray(state.items) && state.items.length) receiveItems(state.items);
     if (phase === "loading") setProgress(state.percent || 0, state.label || "Scanning…", true);
     if (phase === "running") setProgress(state.percent || 0, state.label || "Working…", !state.percent);
+  }
+
+  function receiveItems(batch) {
+    const byKey = new Map(items.map((item) => [item.key, item]));
+    for (const item of batch) {
+      if (!item || !item.key) continue;
+      const previous = byKey.get(item.key);
+      byKey.set(item.key, previous ? {
+        ...previous,
+        ...item,
+        archived: !!(previous.archived || item.archived),
+        shared: !!(previous.shared || item.shared),
+        project: item.project || previous.project || ""
+      } : item);
+    }
+    items = [...byKey.values()];
+    applyFilters(true);
   }
 
   // ---------- Actions ----------
@@ -632,7 +660,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   async function runActions(action) {
     const core = globalThis.CGX_core;
     const keys = [...selected];
-    if (!keys.length || phase !== "idle") return;
+    if (!keys.length || phase !== "idle" || !listComplete) return;
     if (core.isBusy()) { showBanner("Another export is already running in this tab. Wait for it to finish.", "error"); return; }
     el.banner.hidden = true;
     setPhase("running");
