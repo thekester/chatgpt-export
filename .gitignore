@@ -1,4 +1,4 @@
-# Local ChatGPT exports — never commit conversation data.
+# Local ChatGPT exports: never commit conversation data.
 conversations/
 
 # Generated export folders and local build output.

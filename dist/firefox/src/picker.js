@@ -521,7 +521,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     rendered = Math.min(filtered.length, rendered + CHUNK);
     el.rows.appendChild(fragment);
     el.more.hidden = rendered >= filtered.length;
-    el.more.textContent = `Showing ${fmtNumber(rendered)} of ${fmtNumber(filtered.length)}${!listComplete ? " loaded so far" : ""} — scroll for more`;
+    el.more.textContent = `Showing ${fmtNumber(rendered)} of ${fmtNumber(filtered.length)}${!listComplete ? " loaded so far" : ""}. Scroll for more`;
     paintRows();
   }
 

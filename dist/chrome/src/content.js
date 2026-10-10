@@ -940,7 +940,7 @@
         }catch(e){
           checkCancelled();
           const detail={conversation_index:i+1,conversation_title:redactDiagnosticText(item.title||'Untitled').slice(0,200),error_type:e.name||'Error',http_status:e.status||null,message:redactDiagnosticText(e.message||e),stack:e.stack?redactDiagnosticText(e.stack):null};
-          errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status} — `:''}${detail.message}`);
+          errors.push(`Conversation ${i+1} (${item.title||'untitled'}) : ${detail.http_status?`HTTP ${detail.http_status}: `:''}${detail.message}`);
           failureDetails.push(detail);failedIds.push({id,accountId});liveFailureDetails=failureDetails;failed++;diag('conversation.error',{index:i+1,error:e});
         }
         active.delete(String(i+1));completed++;report(`conversation ${i+1} processed`);
@@ -1007,7 +1007,7 @@
         // jumps backwards after the last conversation has been read.
         const progress=i+Math.max(0,Math.min(100,sub))/100;
         const percent=Math.min(100,Math.round(100*progress/items.length));
-        progressPercent(percent,`Conversation ${i+1}/${items.length}${label?` — ${label}`:''}`,i,items.length);
+        progressPercent(percent,`Conversation ${i+1}/${items.length}${label?`: ${label}`:''}`,i,items.length);
       };
       overall(0,'Starting…');
       try{

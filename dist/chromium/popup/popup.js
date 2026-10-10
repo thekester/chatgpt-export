@@ -246,7 +246,7 @@ function showProgress(percent = 0, label = "") {
       addDiagnostic("progress", { percent: value, label });
       lastProgressLabel = label;
     }
-    setStatus(`${value}% — ${label}`);
+    setStatus(`${value}%: ${label}`);
   }
 }
 
