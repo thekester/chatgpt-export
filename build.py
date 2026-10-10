@@ -13,7 +13,10 @@ bg = "src/background.js"
 
 def firefox(m):
     m["background"] = {"scripts": [bg]}
-    m.setdefault("browser_specific_settings", {}).setdefault("gecko", {})["strict_min_version"] = "121.0"
+    gecko = m.setdefault("browser_specific_settings", {}).setdefault("gecko", {})
+    gecko["strict_min_version"] = "140.0"
+    gecko["data_collection_permissions"] = {"required": ["none"]}
+    m["browser_specific_settings"]["gecko_android"] = {"strict_min_version": "142.0"}
     return m
 
 def chromium_family(m):
@@ -35,6 +38,21 @@ def build(name, adapt):
                 relative = f.relative_to(out).as_posix()
                 z.write(f, f"{archive_root}/{relative}")
     print("OK", zpath.name)
+
+    # Store uploads must contain manifest.json at the archive root. Keep these
+    # separate from the versioned GitHub release archives, which have a folder prefix.
+    store_names = {
+        "chrome": "chrome-web-store",
+        "edge": "edge-addons",
+        "firefox": "firefox-amo",
+    }
+    if name in store_names:
+        store_path = DIST / f"chatgpt-export-{store_names[name]}-{base['version']}.zip"
+        with zipfile.ZipFile(store_path, "w", zipfile.ZIP_DEFLATED, allowZip64=True) as z:
+            for f in sorted(out.rglob("*")):
+                if f.is_file():
+                    z.write(f, f.relative_to(out).as_posix())
+        print("OK", store_path.name)
 
 shutil.rmtree(DIST, ignore_errors=True)
 DIST.mkdir(parents=True, exist_ok=True)

@@ -162,6 +162,6 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.35**
+Current version: **0.6.36**
 
-This version improves selected conversation deletion while a history scan is still running, removes deleted conversations from the picker even if later scan pages contain duplicates, and clarifies that a deletion request may take up to 10 minutes to disappear from ChatGPT history. Selected conversations can still be exported or deleted while the scan continues; only one selected action runs at a time. Deletion remains a separate, explicit step, and only successfully exported conversations are offered for deletion.
+This version improves selected conversation deletion while a history scan is still running, removes deleted conversations from the picker even if later scan pages contain duplicates, and clarifies that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker builds its fixed interface without assigning to innerHTML, and Firefox minimum versions match the declared manifest capabilities. Selected conversations can still be exported or deleted while the scan continues; only one selected action runs at a time. Deletion remains a separate, explicit step, and only successfully exported conversations are offered for deletion.
