@@ -1,0 +1,5 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://thekester.github.io/chatgpt-export/sitemap.xml
+Sitemap: https://thekester.github.io/chatgpt-export/sitemap2.xml
