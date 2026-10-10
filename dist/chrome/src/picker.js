@@ -258,7 +258,10 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   function build() {
     host = document.createElement("cgx-export-picker");
     root = host.attachShadow({ mode: "open" });
-    root.innerHTML = `<style>${CSS}</style>${HTML}`;
+    const style = document.createElement("style");
+    style.textContent = CSS;
+    const template = new DOMParser().parseFromString(HTML, "text/html");
+    root.append(style, ...Array.from(template.body.childNodes, (node) => document.importNode(node, true)));
     const q = (s) => root.querySelector(s);
     el = {
       pill: q(".pill"), pillLabel: q(".pill .run-label"), pillBar: q(".pill .bar"), show: q(".show"),
@@ -502,7 +505,15 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       if (url) {
         link.href = url; link.target = "_blank"; link.rel = "noopener";
         link.title = "Open in a new tab"; link.setAttribute("aria-label", `Open “${item.title}” in a new tab`);
-        link.innerHTML = ICONS.open;
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("aria-hidden", "true");
+        for (const d of ["M14 4h6v6", "M20 4 11 13", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"]) {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", d);
+          svg.appendChild(path);
+        }
+        link.appendChild(svg);
       }
       row.appendChild(link);
       fragment.appendChild(row);
