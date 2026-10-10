@@ -1,6 +1,6 @@
-# AMO source submission: ChatGPT Markdown Export 0.6.37
+# AMO source submission: ChatGPT Markdown Export 0.6.38
 
-This archive contains the human-readable source and the build instructions for the Firefox add-on uploaded to addons.mozilla.org as `chatgpt-export-firefox-amo-0.6.37.zip`.
+This archive contains the human-readable source and the build instructions for the Firefox add-on uploaded to addons.mozilla.org as `chatgpt-export-firefox-amo-0.6.38.zip`.
 
 ## Build environment
 
@@ -19,7 +19,7 @@ This archive contains the human-readable source and the build instructions for t
    - Ubuntu or macOS: `python3 setup_build.py`
    - Windows: `py -3 setup_build.py` (or `python setup_build.py`)
 
-5. The script checks the Python version and starts `build.py`. The Firefox AMO package is written to `dist/chatgpt-export-firefox-amo-0.6.37.zip`.
+5. The script checks the Python version and starts `build.py`. The Firefox AMO package is written to `dist/chatgpt-export-firefox-amo-0.6.38.zip`.
 
 The build script copies the readable JavaScript, HTML, CSS, icons, and bundled library without transpiling, concatenating, minifying, or generating application source. It adapts the root manifest for Firefox and packages the result. The build process recreates the `dist/` directory, so run it from the clean extracted source directory, not from a development checkout containing files you want to keep.
 
