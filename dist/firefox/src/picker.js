@@ -849,15 +849,31 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     const label = FORMAT_LABELS[pending.format] || pending.format;
     const summary = `History export finished: ${plural(keys.length, "conversation")} exported as ${label}.`;
     const failed = pending.failed ? ` ${plural(pending.failed, "conversation")} failed and are not listed.` : "";
+    const exportInfo = `${summary}${failed}\nOpen the downloaded file and make sure it is complete before deleting. Only successfully exported conversations are listed.`;
     showBanner(`${summary}${failed}\nThe list shows only these conversations. Nothing is deleted unless you choose to. Click Refresh to see your whole history.`,
       "ok", `Delete these ${fmtNumber(keys.length)} from ChatGPT…`,
-      () => openConfirm("after-export", keys, `${summary}\nOpen the downloaded file and make sure it is complete before deleting. Only the conversations exported successfully are listed below.`), true);
+      () => openConfirm("after-export", keys, exportInfo), true);
   }
 
-  globalThis.CGX_historyExportDone = () => {
+  globalThis.CGX_historyExportDone = ({ autoDeleteResults = null, remainingCount = 0 } = {}) => {
     if (!globalThis.CGX_core) return;
     if (!host || !host.isConnected) build();
     detectTheme();
+    if (Array.isArray(autoDeleteResults)) {
+      const deleted = autoDeleteResults.filter((entry) => entry.ok).length;
+      const failed = autoDeleteResults.length - deleted;
+      const summary = `History export finished. Automatic deletion succeeded for ${plural(deleted, "conversation")}.${failed ? ` ${plural(failed, "conversation")} remain undeleted.` : ""}`;
+      if (open) showBanner(summary, failed ? "error" : "ok");
+      pillAction = remainingCount ? openReview : null;
+      el.show.textContent = remainingCount ? "Review remaining" : "Show";
+      el.pill.hidden = false;
+      el.pillBar.classList.remove("indeterminate");
+      el.pillBar.firstChild.style.width = "100%";
+      el.pillLabel.textContent = summary;
+      el.pillLabel.title = summary;
+      el.pillLabel.style.whiteSpace = "normal";
+      return;
+    }
     if (open) { openReview(); return; }
     pillAction = openReview;
     el.show.textContent = "Review";

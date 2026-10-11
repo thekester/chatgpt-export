@@ -4,6 +4,11 @@ const btnCurrent = $("current");
 const btnAll = $("all");
 const btnPick = $("pick");
 const btnReview = $("review-delete");
+const historyExportDialog = $("history-export-dialog");
+const autoDeleteAfterExport = $("auto-delete-after-export");
+const confirmAutoDeleteRow = $("confirm-auto-delete-row");
+const confirmAutoDelete = $("confirm-auto-delete");
+const startHistoryExport = $("start-history-export");
 const tabHint = $("tab-hint");
 const formatHint = $("format-hint");
 const btnCancel = $("cancel-job");
@@ -464,8 +469,11 @@ function showFinishedExport(job) {
   const message = job.joplinHistory
     ? `${job.count} conversations exported as notes in one JEX notebook. Import the single JEX file into Joplin.`
     : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
-  setStatus(job.failed ? `${message} ${job.failed} failed; check the downloaded errors report and diagnostic log.` : message, !!job.failed);
-  updateActivity([{ label: job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully." }]);
+  const deletionMessage = job.autoDeleteRequested
+    ? ` Automatic deletion succeeded for ${job.autoDeleted || 0} conversation(s).${job.autoDeleteFailed ? ` ${job.autoDeleteFailed} remain undeleted.` : ""} Removed conversations may take up to 10 minutes to disappear from history.`
+    : "";
+  setStatus(`${message}${job.failed ? ` ${job.failed} export(s) failed; check the downloaded errors report and diagnostic log.` : ""}${deletionMessage}`, !!(job.failed || job.autoDeleteFailed));
+  updateActivity([{ label: job.autoDeleteRequested ? `Export complete; automatic deletion succeeded for ${job.autoDeleted || 0} conversation(s).` : (job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully.") }]);
   offerReview(job.reviewCount || 0);
 }
 
@@ -563,12 +571,17 @@ async function run(type, optionOverrides = {}) {
     if (r.imageFailures) text += ` ${r.imageFailures} image(s) could not be downloaded; kept as remote links.`;
     if (r.fileFailures) text += ` ${r.fileFailures} file(s) could not be downloaded.`;
     if (currentOptions().embeddedMd && !currentOptions().modernEmbeddedMd) text += " Self-contained MIME/Base64 Markdown included.";
+    if (Array.isArray(r.autoDeleteResults)) {
+      const deleted = r.autoDeleteResults.filter((entry) => entry.ok).length;
+      const failedDeletes = r.autoDeleteResults.length - deleted;
+      text += ` Automatic deletion succeeded for ${deleted} conversation(s).${failedDeletes ? ` ${failedDeletes} remain undeleted; use Review to inspect them.` : ""} Removed conversations may take up to 10 minutes to disappear from history.`;
+    }
     showProgress(100);
-    const hasIssues = !!(r.failed || r.imageFailures || r.fileFailures);
+    const hasIssues = !!(r.failed || r.imageFailures || r.fileFailures || (r.autoDeleteResults && r.autoDeleteResults.some((entry) => !entry.ok)));
     if (hasIssues) {
       prepareDiagnosticLog({
         remote: r.diagnostics || null,
-        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, count: r.count || 0, parts: r.parts || 0, conversation_failures: r.failureDetails || [] }
+        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, automatic_deletions_failed: r.autoDeleteResults ? r.autoDeleteResults.filter((entry) => !entry.ok).length : 0, count: r.count || 0, parts: r.parts || 0, conversation_failures: r.failureDetails || [] }
       });
       text += " Diagnostic log available below.";
     }
@@ -610,7 +623,31 @@ api.runtime.onMessage.addListener((msg, sender) => {
 [...formatInputs, ...mediaModeInputs, ...mdHtmlInputs, optImages, optFiles, optJson, optThinking, optBranches, optIncremental, optChecksums, optPartSize, optJexDelay, optHistoryCount, optLimit].forEach((el) => el.addEventListener("change", saveOptions));
 optHistoryCount.addEventListener("input", updateFormatUI);
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
-btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: optLimit.checked ? historyLimit() : 0 }));
+btnAll.addEventListener("click", () => {
+  autoDeleteAfterExport.checked = false;
+  confirmAutoDelete.checked = false;
+  confirmAutoDeleteRow.hidden = true;
+  startHistoryExport.disabled = false;
+  historyExportDialog.showModal();
+});
+$("cancel-history-export").addEventListener("click", () => historyExportDialog.close());
+autoDeleteAfterExport.addEventListener("change", () => {
+  confirmAutoDeleteRow.hidden = !autoDeleteAfterExport.checked;
+  if (!autoDeleteAfterExport.checked) confirmAutoDelete.checked = false;
+  startHistoryExport.disabled = autoDeleteAfterExport.checked && !confirmAutoDelete.checked;
+});
+confirmAutoDelete.addEventListener("change", () => {
+  startHistoryExport.disabled = autoDeleteAfterExport.checked && !confirmAutoDelete.checked;
+});
+startHistoryExport.addEventListener("click", () => {
+  if (autoDeleteAfterExport.checked && !confirmAutoDelete.checked) return;
+  const autoDelete = autoDeleteAfterExport.checked;
+  historyExportDialog.close();
+  run("cgx-export-all", {
+    conversationLimit: optLimit.checked ? historyLimit() : 0,
+    autoDeleteAfterExport: autoDelete
+  });
+});
 // Opens the large conversation picker inside the ChatGPT page, then closes
 // the popup so the user can work in it directly.
 async function openPicker(review = false) {

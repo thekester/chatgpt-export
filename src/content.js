@@ -1112,6 +1112,36 @@
     if(error){const failure=new Error(error.status?`HTTP ${error.status} while permanently deleting conversation.`:String(error.message||error));failure.status=error.status||null;throw failure;}
     return true;
   }
+  async function autoDeleteExported(items,opts={}){
+    const results=[];let deleted=0;
+    const delay=Math.max(0,Math.min(30000,Number(opts.jexDelayMs??DEFAULT_JEX_CONVERSATION_DELAY_MS)||0));
+    for(let i=0;i<items.length;i++){
+      const item=items[i],key=managerItemKey(item),id=managerConversationId(item);
+      if(jobCancelled){
+        for(const skipped of items.slice(i))results.push({key:managerItemKey(skipped),conversationId:managerConversationId(skipped),title:skipped.title||'Untitled',ok:false,skipped:true,error:'Automatic deletion cancelled; this conversation was not deleted.'});
+        break;
+      }
+      try{
+        await deleteConversationPermanently(item);
+        deleted++;
+        managerDeletedDuringScan.add(`key:${key}`);
+        if(id!=null)managerDeletedDuringScan.add(`id:${id}`);
+        results.push({key,conversationId:id,title:item.title||'Untitled',ok:true});
+        if(managerListCache)managerListCache={...managerListCache,items:managerListCache.items.filter(candidate=>!managerWasDeleted(candidate))};
+        if(pendingDeletion){const remaining=pendingDeletion.items.filter(candidate=>!managerWasDeleted(candidate));pendingDeletion=remaining.length?{...pendingDeletion,items:remaining}:null;}
+      }catch(error){
+        const cancelled=jobCancelled||error.name==='AbortError';
+        results.push({key,conversationId:id,title:item.title||'Untitled',ok:false,error:cancelled?'Deletion interrupted; check this conversation in ChatGPT.':redactDiagnosticText(error.message||error),status:error.status||null});
+        if(cancelled){
+          for(const skipped of items.slice(i+1))results.push({key:managerItemKey(skipped),conversationId:managerConversationId(skipped),title:skipped.title||'Untitled',ok:false,skipped:true,error:'Automatic deletion cancelled; this conversation was not deleted.'});
+          break;
+        }
+      }
+      progressPercent(Math.round((i+1)*100/items.length),`Automatic deletion: ${deleted}/${items.length} conversations deleted`,i+1,items.length);
+      if(i+1<items.length&&!jobCancelled){try{await jobSleep(delay);}catch(error){if(!jobCancelled)throw error;}}
+    }
+    return results;
+  }
   function defaultExportOptions(options={}){
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...options};
     opts.modernEmbeddedMd=opts.format==='jex'||!!opts.modernEmbeddedMd;
@@ -1236,16 +1266,22 @@
     if(!opts.md&&!opts.html){sendResponse({ok:false,error:'Choisis au moins un format.',diagnostics:diagnosticSnapshot({error:{message:'No export format selected.'}})});return false;}
     busy=true;jobCancelled=false;jobAbortController=new AbortController();activityState=[];liveFailureDetails=[];lastProgressFailureCount=0;progressState={percent:0,label:'Starting export…',done:null,total:null,updatedAt:Date.now()};lastExportState=null;
     const job=msg.type==='cgx-export-current'?exportCurrent(opts):exportAll(opts);
-    job.then(r=>{
+    job.then(async r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
       diag('export.complete',{count:r.count||0,failed:r.failed||0,imageFailures:r.imageFailures||0,fileFailures:r.fileFailures||0,parts:r.parts||0});
       const exportedItems=r.exportedItems||[];delete r.exportedItems;
       if(msg.type==='cgx-export-all'&&exportedItems.length){
         pendingDeletion={items:exportedItems,format:opts.format||'both',count:exportedItems.length,failed:r.failed||0};
         r.reviewCount=exportedItems.length;
-        if(typeof globalThis.CGX_historyExportDone==='function')try{globalThis.CGX_historyExportDone();}catch(_){}
+        if(opts.autoDeleteAfterExport){
+          progressPercent(1,`Export ready. Starting automatic deletion of ${exportedItems.length} successfully exported conversations…`,0,exportedItems.length);
+          try{r.autoDeleteResults=await autoDeleteExported(exportedItems,opts);}catch(error){r.autoDeleteError=redactDiagnosticText(error.message||error);r.autoDeleteResults=exportedItems.map(item=>({key:managerItemKey(item),conversationId:managerConversationId(item),title:item.title||'Untitled',ok:false,skipped:true,error:r.autoDeleteError}));}
+          r.reviewCount=pendingDeletion?pendingDeletion.items.length:0;
+        }
+        if(typeof globalThis.CGX_historyExportDone==='function')try{globalThis.CGX_historyExportDone({autoDeleteResults:r.autoDeleteResults||null,remainingCount:r.reviewCount});}catch(_){}
       }
-      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin,reviewCount:r.reviewCount||0};
+      const autoDeleteResults=r.autoDeleteResults||[];
+      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin,reviewCount:r.reviewCount||0,autoDeleteRequested:!!opts.autoDeleteAfterExport,autoDeleted:autoDeleteResults.filter(x=>x.ok).length,autoDeleteFailed:autoDeleteResults.filter(x=>!x.ok).length};
       sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
     }).catch(e=>{
       diag('export.failure',{error:e});

@@ -121,6 +121,14 @@
     #activity-list li:last-child { color: var(--ink); }
     #cancel-job { width: 100%; margin-top: 8px; padding: 6px 10px; border: 1px solid color-mix(in srgb, var(--error) 55%, var(--line)); border-radius: 6px; background: transparent; color: var(--error); cursor: pointer; }
     #review-delete { width: 100%; margin-top: 8px; padding: 7px 10px; border: 1px solid var(--accent); border-radius: 6px; background: var(--panel); color: var(--ink); font-weight: 600; cursor: pointer; }
+    #history-export-dialog { width: min(440px, calc(100vw - 32px)); padding: 18px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); color: var(--ink); box-shadow: 0 12px 36px rgba(0,0,0,.28); }
+    #history-export-dialog::backdrop { background: rgba(0,0,0,.48); }
+    #history-export-dialog h2 { margin: 0 0 8px; color: var(--ink); font-size: 16px; letter-spacing: 0; text-transform: none; }
+    #history-export-dialog p { margin: 0 0 12px; color: var(--muted); font-size: 13px; }
+    #history-export-dialog .option { margin: 12px 0; padding: 10px; border: 1px solid var(--line); border-radius: 7px; }
+    #history-export-dialog .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+    #history-export-dialog .dialog-actions button { padding: 7px 11px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); cursor: pointer; }
+    #history-export-dialog .dialog-actions .primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); font-weight: 600; }
     #status { min-height: 1.4em; margin: 8px 0 0; color: var(--muted); font-size: 13px; }
     #status:empty { display: none; }
     #status.error { color: var(--error); }
@@ -220,6 +228,18 @@
     <button id="cancel-job" type="button" hidden>Cancel export</button>
     <button id="review-delete" type="button" hidden>Review or delete the exported conversations…</button>
   </section>
+
+  <dialog id="history-export-dialog" aria-labelledby="history-export-title">
+    <h2 id="history-export-title">Export conversation history?</h2>
+    <p>The export starts now and may take a while. You can close this popup, but keep the ChatGPT tab open until it finishes.</p>
+    <label class="option"><input type="checkbox" id="auto-delete-after-export"> Do you also want to delete the conversations exported successfully from ChatGPT?</label>
+    <label id="confirm-auto-delete-row" class="option" hidden><input type="checkbox" id="confirm-auto-delete"> I confirm: automatically delete them after the export files are created and downloads are started. This cannot be undone, and the browser cannot verify that I kept the files.</label>
+    <p>If you confirm deletion here, no further confirmation appears when the export finishes. Conversations that fail to export will not be deleted. Removed conversations may take up to 10 minutes to disappear from your history.</p>
+    <div class="dialog-actions">
+      <button id="cancel-history-export" type="button">Cancel</button>
+      <button id="start-history-export" class="primary" type="button">Start export</button>
+    </div>
+  </dialog>
 
   <footer>
     <button id="download-failures" type="button" hidden>Download failure log</button>
