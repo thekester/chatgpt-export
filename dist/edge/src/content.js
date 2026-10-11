@@ -1229,6 +1229,7 @@
   function defaultExportOptions(options={}){
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...options};
     opts.modernEmbeddedMd=opts.format==='jex'||!!opts.modernEmbeddedMd;
+    opts.jexRichHtml=opts.format==='jex'||!!opts.jexRichHtml;
     opts.embeddedMd=!!(opts.embeddedMd||opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md)opts.md=true;
     return opts;
@@ -1344,6 +1345,7 @@
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
     opts.modernEmbeddedMd = opts.format === 'jex' || !!opts.modernEmbeddedMd;
+    opts.jexRichHtml = opts.format === 'jex' || !!opts.jexRichHtml;
     opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);

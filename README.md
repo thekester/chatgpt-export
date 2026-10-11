@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.44**
+Current version: **0.6.45**
 
-This version preserves ChatGPT rich components more faithfully in Joplin JEX notes, including styled cards, rows, charts, lists, links, and available generated illustrations. Citation links are resolved from conversation data and, for the open conversation, from visible ChatGPT source popovers.
+This version enables rich component rendering for both single-conversation and full-history JEX exports, preserving styled cards, rows, charts, lists, links, and available generated illustrations. Citation links are resolved from conversation data and, for the open conversation, from visible ChatGPT source popovers.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.
