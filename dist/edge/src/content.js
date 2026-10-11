@@ -718,10 +718,17 @@
     if (!conv || !conv.mapping) return 0;
     const byId = new Map(Object.values(conv.mapping).filter((node) => node && node.message).map((node) => [node.message.id, node.message]));
     const previousFocus = document.activeElement;
+    const visibleImages = new Map();
     let added = 0;
     for (const messageEl of document.querySelectorAll('[data-message-author-role="assistant"]')) {
       checkCancelled();
       const host = messageEl.closest('article') || messageEl.closest('[data-testid^="conversation-turn"]') || messageEl;
+      for (const image of host.querySelectorAll('[data-d-component="image"] img[src]')) {
+        const url = image.src;
+        if (/^https?:\/\//i.test(url) && CGX.isArchiveSafeUrl(url) && !visibleImages.has(url)) {
+          visibleImages.set(url, {url,alt:(image.alt||'').trim()});
+        }
+      }
       const id = host.getAttribute('data-message-id') || messageEl.getAttribute('data-message-id') || host.querySelector('[data-message-id]')?.getAttribute('data-message-id');
       const message = id && byId.get(id);
       if (!message) continue;
@@ -764,16 +771,51 @@
         return match[1].match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1] || '';
       });
       if (queries.length) {
-        const images = [...host.querySelectorAll('[data-d-component="image"] img[src]')].map((image) => ({
-          url: image.src,
-          alt: (image.alt || '').trim(),
-        })).filter((image) => /^https?:\/\//i.test(image.url) && CGX.isArchiveSafeUrl(image.url));
+        const images = [...host.querySelectorAll('[data-d-component="image"] img[src]')].map((image) => ({url:image.src,alt:(image.alt||'').trim()}))
+          .filter((image) => /^https?:\/\//i.test(image.url) && CGX.isArchiveSafeUrl(image.url));
         if (images.length) {
           message.metadata = message.metadata || {};
           message.metadata.cgx_dom_async_images = queries.slice(0, images.length).map((query, index) => ({ ...images[index], query }));
           added += Math.min(queries.length, images.length);
         }
       }
+    }
+    // Shared pages can render the image components correctly while omitting
+    // message IDs that match the conversation API. Recover those images by
+    // matching their visible alt text against unresolved AsyncImage queries.
+    const pendingImages = [];
+    const assignedUrls = new Set();
+    for (const node of Object.values(conv.mapping)) {
+      const message = node && node.message;
+      if (!message || message.author?.role !== 'assistant') continue;
+      const text = (message.content?.parts || []).filter((part) => typeof part === 'string').join('\n');
+      const queries = [...text.matchAll(/<AsyncImage\b([^>]*)\/?\s*>/gi)].map((match) =>
+        match[1].match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1] || ''
+      );
+      const existing = message.metadata?.cgx_dom_async_images || [];
+      for (const image of existing) if (image.url) assignedUrls.add(image.url);
+      for (const query of queries) {
+        if (!existing.some((image) => image.query === query && image.url)) pendingImages.push({message,query});
+      }
+    }
+    const remainingImages = [...visibleImages.values()].filter((image) => !assignedUrls.has(image.url));
+    const genericWords = new Set(['minimal','illustration','image','images','technology','advanced','blue','dark','complex','ai']);
+    const words = (value) => String(value||'').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter((word) => word.length > 2 && !genericWords.has(word));
+    for (const pending of pendingImages) {
+      if (!remainingImages.length) break;
+      const queryWords = new Set(words(pending.query));
+      let bestIndex = 0, bestScore = -1;
+      for (let i = 0; i < remainingImages.length; i++) {
+        const score = words(remainingImages[i].alt).filter((word) => queryWords.has(word)).length;
+        if (score > bestScore) { bestIndex = i; bestScore = score; }
+      }
+      const [image] = remainingImages.splice(bestIndex, 1);
+      pending.message.metadata = pending.message.metadata || {};
+      pending.message.metadata.cgx_dom_async_images = [
+        ...(pending.message.metadata.cgx_dom_async_images || []),
+        {...image,query:pending.query}
+      ];
+      added++;
     }
     if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === 'function') {
       try { previousFocus.focus({ preventScroll: true }); } catch (_) { /* best-effort */ }
