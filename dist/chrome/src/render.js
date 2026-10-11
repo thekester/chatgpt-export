@@ -312,6 +312,9 @@
       return preprocessJexRichComponents(text, refs, extraData, ctx);
     }
     let out = dedentRichComponentMarkup(text);
+    // ChatGPT sometimes serializes Markdown table row breaks as HTML <br>
+    // tags. Markdown parsers require actual newlines between table rows.
+    out = out.replace(/<br\s*\/?>[ \t]*(?=\|)/gi, "\n");
     out = out.replace(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g, (_match, rawIds) => {
       let ids = [];
       try { ids = JSON.parse(rawIds); } catch (_) {}
