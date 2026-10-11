@@ -7,7 +7,7 @@
   const FORMAT_LABELS = { both: "Markdown + HTML", md: "Markdown", html: "HTML", jex: "Joplin (.jex)" };
   const PERIODS = [["any", "Any time"], ["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 3 months"], ["365", "Last 12 months"], ["custom", "Custom dates…"]];
   const PLACES = [["all", "All locations"], ["active", "Chats"], ["project", "Projects"], ["archived", "Archived"], ["shared", "Shared"]];
-  const SORTS = [["recent", "Newest first"], ["oldest", "Oldest first"], ["title-asc", "Title A–Z"], ["title-desc", "Title Z–A"]];
+  const SORTS = [["recent", "Newest first"], ["oldest", "Oldest first"], ["title-asc", "Title A-Z"], ["title-desc", "Title Z-A"]];
   const CHUNK = 150;
   const DAY = 86400000;
 
@@ -119,6 +119,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 .foot:has(.run:not([hidden])) .run { flex: 1 1 100%; order: -1; }
 .run-text { flex: 1; min-width: 0; }
 .run-label { overflow: hidden; margin-bottom: 6px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.run-note { margin-top: 6px; color: var(--muted); font-size: 12px; }
 .bar { position: relative; height: 6px; overflow: hidden; border-radius: 99px; background: var(--line); }
 .bar i { position: absolute; inset: 0 auto 0 0; width: 0; border-radius: inherit; background: var(--accent); transition: width .25s ease; }
 .bar.indeterminate i { width: 35% !important; animation: slide 1.2s ease-in-out infinite; }
@@ -155,6 +156,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 <div class="pill" hidden role="status">
   <div class="run-text"><div class="run-label"></div><div class="bar"><i></i></div></div>
   <button class="ghost show" type="button">Show</button>
+  <button class="icon-btn pill-close" type="button" aria-label="Dismiss" title="Dismiss">${ICONS.close}</button>
 </div>
 <div class="backdrop" hidden>
   <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="cgx-title">
@@ -197,7 +199,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
         <button class="primary export" type="button" disabled>${ICONS.download}<span>Export</span></button>
       </div>
       <div class="run" hidden>
-        <div class="run-text"><div class="run-label">Working…</div><div class="bar"><i></i></div></div>
+        <div class="run-text"><div class="run-label">Working…</div><div class="bar"><i></i></div><div class="run-note">Keep this tab open: reloading or closing it stops the job. To keep chatting, open ChatGPT in another window.</div></div>
         <button class="ghost hide" type="button" title="Keep it running and use ChatGPT meanwhile">Run in background</button>
         <button class="danger-ghost cancel" type="button">Cancel</button>
       </div>
@@ -284,7 +286,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
 
     el.close.addEventListener("click", close);
     el.backdrop.addEventListener("mousedown", (event) => { if (event.target === el.backdrop) close(); });
-    el.show.addEventListener("click", show);
+    el.show.addEventListener("click", () => (pillAction ? pillAction() : show()));
+    root.querySelector(".pill-close").addEventListener("click", () => { el.pill.hidden = true; pillAction = null; });
     el.hide.addEventListener("click", close);
     el.refresh.addEventListener("click", () => load(true));
     el.search.addEventListener("input", applyFilters);
@@ -381,7 +384,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       renderEmpty("Busy", "An export started from the extension popup is still running.");
       return;
     }
-    if (force) { items = []; filtered = []; rendered = 0; selected.clear(); }
+    if (force) { items = []; filtered = []; rendered = 0; selected.clear(); reviewMode = false; }
     listComplete = false;
     setPhase("loading");
     el.banner.hidden = true;
@@ -616,6 +619,9 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   // Called when a job ends. If the user sent it to the background, the pill
   // stays with the outcome instead of the modal popping up by itself.
   function finish(summary) {
+    pillAction = null;
+    el.show.textContent = "Show";
+    el.pillLabel.style.whiteSpace = "";
     if (open) { el.pill.hidden = true; return; }
     el.pill.hidden = false;
     el.pillBar.classList.remove("indeterminate");
@@ -676,7 +682,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
   let confirmState = null;
 
   function openConfirm(mode, keys, exportInfo = "") {
-    const chosen = items.filter((item) => keys.includes(item.key));
+    const wanted = new Set(keys);
+    const chosen = items.filter((item) => wanted.has(item.key));
     if (!chosen.length || phase === "running") return;
     confirmState = { mode, keys: chosen.map((item) => item.key) };
     el.preview.replaceChildren();
@@ -813,11 +820,62 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
     el.banner.hidden = false;
   }
 
-  globalThis.CGX_openPicker = (formatOptions = {}, initialFormat = "both") => {
+  // ---------- Review after a history export ----------
+  // "Entire history" runs from the popup, which usually closes before the
+  // export ends. The page then shows a pill; it opens the list of exported
+  // conversations so the user can decide to delete them (same two-step
+  // confirmation as everywhere else). Nothing is deleted automatically.
+
+  let reviewMode = false, pillAction = null;
+
+  function openReview() {
+    pillAction = null;
+    el.show.textContent = "Show";
+    const pending = globalThis.CGX_core.pendingDeletion && globalThis.CGX_core.pendingDeletion();
+    show();
+    if (phase !== "idle") return;
+    if (!pending || !pending.items.length) {
+      showBanner("Nothing left to review from the last history export.", "");
+      load(false);
+      return;
+    }
+    reviewMode = true;
+    items = pending.items;
+    listComplete = true;
+    selected.clear();
+    view = "all";
+    applyFilters();
+    const keys = items.map((item) => item.key);
+    const label = FORMAT_LABELS[pending.format] || pending.format;
+    const summary = `History export finished: ${plural(keys.length, "conversation")} exported as ${label}.`;
+    const failed = pending.failed ? ` ${plural(pending.failed, "conversation")} failed and are not listed.` : "";
+    showBanner(`${summary}${failed}\nThe list shows only these conversations. Nothing is deleted unless you choose to. Click Refresh to see your whole history.`,
+      "ok", `Delete these ${fmtNumber(keys.length)} from ChatGPT…`,
+      () => openConfirm("after-export", keys, `${summary}\nOpen the downloaded file and make sure it is complete before deleting. Only the conversations exported successfully are listed below.`), true);
+  }
+
+  globalThis.CGX_historyExportDone = () => {
+    if (!globalThis.CGX_core) return;
+    if (!host || !host.isConnected) build();
+    detectTheme();
+    if (open) { openReview(); return; }
+    pillAction = openReview;
+    el.show.textContent = "Review";
+    el.pill.hidden = false;
+    el.pillBar.classList.remove("indeterminate");
+    el.pillBar.firstChild.style.width = "100%";
+    el.pillLabel.textContent = "History export done. Review it, or delete the exported conversations from ChatGPT.";
+    el.pillLabel.title = el.pillLabel.textContent;
+    el.pillLabel.style.whiteSpace = "normal";
+  };
+
+  globalThis.CGX_openPicker = (formatOptions = {}, initialFormat = "both", { review = false } = {}) => {
     if (!globalThis.CGX_core) return;
     if (!host || !host.isConnected) build();
     formats = formatOptions || {};
     if (phase === "idle" && FORMAT_LABELS[initialFormat]) { format = initialFormat; el.format.value = format; }
+    if (review) { openReview(); return; }
+    if (reviewMode && phase === "idle") { reviewMode = false; items = []; listComplete = false; el.banner.hidden = true; }
     show();
     if (phase === "idle") load(false);
   };

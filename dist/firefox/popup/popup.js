@@ -3,6 +3,7 @@ const $ = (id) => document.getElementById(id);
 const btnCurrent = $("current");
 const btnAll = $("all");
 const btnPick = $("pick");
+const btnReview = $("review-delete");
 const tabHint = $("tab-hint");
 const formatHint = $("format-hint");
 const btnCancel = $("cancel-job");
@@ -285,6 +286,7 @@ function refreshButtons() {
 function setBusy(b) {
   busy = b;
   btnCancel.hidden = !b;
+  $("keep-tab").hidden = !b;
   btnCancel.disabled = false;
   btnCancel.textContent = "Cancel export";
   refreshButtons();
@@ -358,7 +360,7 @@ infoButtons.forEach((button) => {
     if (wasOpen) { help.hidden = true; return; }
     button.setAttribute("aria-expanded", "true");
     help.textContent = button.dataset.help || "";
-    (button.closest("label") || button).after(help);
+    (button.closest("label, .grant-row") || button).after(help);
     help.hidden = !help.textContent;
   });
 });
@@ -464,6 +466,7 @@ function showFinishedExport(job) {
     : (job.joplin ? "Joplin JEX export ready. Import it with File > Import > JEX." : `${job.count} conversation(s) exported.`);
   setStatus(job.failed ? `${message} ${job.failed} failed; check the downloaded errors report and diagnostic log.` : message, !!job.failed);
   updateActivity([{ label: job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully." }]);
+  offerReview(job.reviewCount || 0);
 }
 
 async function restoreExportActivity() {
@@ -539,6 +542,7 @@ async function run(type, optionOverrides = {}) {
   exportTabId = tabId;
   activityWrap.hidden = false;
   updateFailureLog([]);
+  offerReview(0);
   updateActivity([{ label: type === "cgx-export-all" ? "Starting account history scan…" : "Starting conversation export…" }]);
   showProgress(0, type === "cgx-export-all" ? "Loading conversation list…" : "Starting export…");
   try {
@@ -569,6 +573,7 @@ async function run(type, optionOverrides = {}) {
       text += " Diagnostic log available below.";
     }
     setStatus(text, hasIssues);
+    offerReview(r.reviewCount || 0);
   } catch (e) {
     if (e.cancelled || e.name === "AbortError") {
       updateActivity([{ label: "Export cancelled. You can start a new export." }]);
@@ -608,18 +613,36 @@ btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => run("cgx-export-all", { conversationLimit: optLimit.checked ? historyLimit() : 0 }));
 // Opens the large conversation picker inside the ChatGPT page, then closes
 // the popup so the user can work in it directly.
-btnPick.addEventListener("click", async () => {
+async function openPicker(review = false) {
   if (busy) return;
   try {
     if (!tabId && !(await resolveActiveTab())) { setStatus("Open chatgpt.com in this tab to export.", true); return; }
     const formats = Object.fromEntries(["md", "html", "both", "jex"].map((f) => [f, { ...currentOptions(f), incremental: false }]));
-    const r = await send({ type: "cgx-open-picker", formats, format: selectedFormat() });
+    const r = await send({ type: "cgx-open-picker", formats, format: selectedFormat(), review });
     if (!r || !r.ok) throw new Error(r?.error || "Could not open the conversation picker.");
     window.close();
   } catch (e) {
     progressWrap.hidden = true;
     setStatus(e.message || "Could not open the conversation picker. Reload the ChatGPT tab and try again.", true);
   }
+}
+btnPick.addEventListener("click", () => openPicker(false));
+// After a history export, deleting the exported conversations is offered in
+// the page (list + two-step confirmation); it is never done automatically.
+function offerReview(count) {
+  btnReview.hidden = !count;
+  btnReview.textContent = `Review or delete the ${Number(count).toLocaleString()} exported conversations…`;
+}
+btnReview.addEventListener("click", () => openPicker(true));
+// Widen the popup while the options are open (see body.wide in popup.html)
+// and remember the choice for the next time the popup opens.
+const advanced = $("advanced");
+function applyOptionsLayout() { document.body.classList.toggle("wide", advanced.open); }
+try { advanced.open = localStorage.getItem("cgx-options-open") === "1"; } catch (_) {}
+applyOptionsLayout();
+advanced.addEventListener("toggle", () => {
+  applyOptionsLayout();
+  try { localStorage.setItem("cgx-options-open", advanced.open ? "1" : "0"); } catch (_) {}
 });
 btnLog.addEventListener("click", downloadDiagnosticLog);
 btnFailures.addEventListener("click", downloadFailureLog);

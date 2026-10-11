@@ -36,6 +36,7 @@
   let lastProgressFailureCount = 0;
   let rateLimitUntil = 0;
   let managerListCache = null;
+  let pendingDeletion = null;
   const managerDeletedDuringScan = new Set();
   const progressListeners = new Set();
 
@@ -837,6 +838,29 @@
 
   function timeMs(v){if(v==null)return 0;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:0;}
 
+  // Conversation ids are global, so one conversation can only appear once.
+  // The same workspace can be reachable under two account ids (the personal
+  // space is both its real id and the "_account=personal" cookie value);
+  // keying by account would export every conversation twice.
+  function mergeListed(found){
+    const byId=new Map();
+    for(const x of found){
+      const id=x.conversation_id||x.id;if(!id)continue;
+      const prev=byId.get(id);
+      byId.set(id,prev?{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)}:x);
+    }
+    return[...byId.values()];
+  }
+  // An account whose active conversations are exactly those of an account
+  // already scanned is an alias of that workspace: skip its other scans.
+  function isAccountAlias(scannedSets,list){
+    const ids=new Set(list.map(x=>x.conversation_id||x.id).filter(Boolean));
+    if(!ids.size)return false;
+    const alias=scannedSets.some(prev=>prev.size===ids.size&&[...ids].every(id=>prev.has(id)));
+    if(!alias)scannedSets.push(ids);
+    return alias;
+  }
+
   async function listAll(opts,onProgress=()=>{},onItems=()=>{}){
     const startedAt=Date.now(); let stage='Connecting to the account…';
     const found=[]; const projectsIndex=[];let observed=0;
@@ -846,6 +870,8 @@
     try{
       announce();
       const session=await getSession(); const accounts=collectAccountIds(session);
+      const scannedSets=[],aliases=new Set();
+      const realAccounts=()=>accounts.filter(id=>!aliases.has(id));
       const limit=Math.max(0,Math.floor(Number(opts.conversationLimit)||0));
       if(limit){
         for(let accountNo=0;accountNo<accounts.length;accountNo++){
@@ -853,19 +879,20 @@
           const accountId=accounts[accountNo],accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
           stage=`${accountLabel}scanning recent active conversations (up to ${limit})`;announce();
           const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));},limit);
+          if(isAccountAlias(scannedSets,active)){aliases.add(accountId);setCapability('workspace_alias','detected',`Account ${accountNo+1} is an alias of an already scanned workspace.`);continue;}
           for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});
         }
-        const byKey=new Map();
-        for(const x of found){const id=x.conversation_id||x.id;if(id)byKey.set(`${x._cgxAccountId||'personal'}:${id}`,x);}
-        const items=[...byKey.values()].sort((a,b)=>timeMs(b.update_time||b.create_time)-timeMs(a.update_time||a.create_time)).slice(0,limit);
+        const items=mergeListed(found).sort((a,b)=>timeMs(b.update_time||b.create_time)-timeMs(a.update_time||a.create_time)).slice(0,limit);
         onProgress(`${items.length} most recent active conversations found · ${elapsed()} elapsed`);
-        return{items,projectsIndex,accounts};
+        return{items,projectsIndex,accounts:realAccounts()};
       }
       for(let accountNo=0;accountNo<accounts.length;accountNo++){
         checkCancelled();
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
-        const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));}); for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
+        const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));});
+        if(isAccountAlias(scannedSets,active)){aliases.add(accountId);setCapability('workspace_alias','detected',`Account ${accountNo+1} is an alias of an already scanned workspace; skipped.`);continue;}
+        for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}scanning archived conversations`;announce();
         const archived=await listRegular(accountId,true,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:true,_cgxAccountId:accountId})));}); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}finding projects`;announce();
@@ -885,12 +912,10 @@
       }
       stage='Removing duplicates and preparing the export';announce();
       checkCancelled();
-      const byKey=new Map();
-      for(const x of found){const id=x.conversation_id||x.id;if(!id)continue;const key=`${x._cgxAccountId||'personal'}:${id}`;const prev=byKey.get(key);if(prev){byKey.set(key,{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)});}else byKey.set(key,x);}
-      let items=[...byKey.values()];
+      let items=mergeListed(found);
       if(opts.since){const since=Number(opts.since)||0;items=items.filter(x=>timeMs(x.update_time||x.create_time)>since);}
       onProgress(`${items.length} unique conversations found · ${elapsed()} elapsed`);
-      return{items,projectsIndex,accounts};
+      return{items,projectsIndex,accounts:realAccounts()};
     }finally{clearInterval(heartbeat);}
   }
 
@@ -957,7 +982,7 @@
       download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
     }
     progressPercent(100,`${items.length}/${items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,items.length,items.length);
-    return{count:exported,failed,failedIds,parts:1,joplinHistory:true,failureDetails};
+    return{count:exported,failed,failedIds,parts:1,joplinHistory:true,failureDetails,exportedItems:succeededItems(items,failedIds)};
   }
 
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}
@@ -1031,7 +1056,11 @@
     progressPercent(100,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
     progressPercent(100,'Export ready.',items.length,items.length);
-    return{count:items.length-totalErrors,failed:totalErrors,failedIds,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts};
+    return{count:items.length-totalErrors,failed:totalErrors,failedIds,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts,exportedItems:succeededItems(items,failedIds)};
+  }
+  function succeededItems(items,failedIds){
+    const failed=new Set((failedIds||[]).map(f=>JSON.stringify([f.accountId||'',f.id||''])));
+    return items.filter(item=>!failed.has(managerItemKey(item)));
   }
 
   function managerItemKey(item){return JSON.stringify([item._cgxAccountId||'',item.conversation_id||item.id||'']);}
@@ -1043,10 +1072,18 @@
   }
   function publishPickerItems(rawItems){
     if(!rawItems||!rawItems.length)return;
-    const byKey=new Map((managerListCache&&managerListCache.items||[]).map(item=>[managerItemKey(item),item]));
-    for(const item of rawItems){const key=managerItemKey(item);if(!managerWasDeleted(item))byKey.set(key,{...(byKey.get(key)||{}),...item});}
-    managerListCache={...(managerListCache||{}),complete:false,items:[...byKey.values()]};
-    const state={...(progressState||{}),items:rawItems.filter(item=>!managerWasDeleted(item)).map(managerSummary)};
+    // Keyed by conversation id (see mergeListed): a workspace alias must not
+    // show each conversation twice while the scan is still running.
+    const byId=new Map((managerListCache&&managerListCache.items||[]).map(item=>[item.conversation_id||item.id,item]));
+    const published=[];
+    for(const item of rawItems){
+      const id=item.conversation_id||item.id;if(!id||managerWasDeleted(item))continue;
+      const prev=byId.get(id);
+      const merged=prev?{...item,...prev,_cgxArchived:!!(prev._cgxArchived||item._cgxArchived),_cgxShared:!!(prev._cgxShared||item._cgxShared),_cgxShareId:prev._cgxShareId||item._cgxShareId,_cgxProjectId:prev._cgxProjectId||item._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||item._cgxProjectTitle}:item;
+      byId.set(id,merged);published.push(merged);
+    }
+    managerListCache={...(managerListCache||{}),complete:false,items:[...byId.values()]};
+    const state={...(progressState||{}),items:published.map(managerSummary)};
     for(const listener of progressListeners){try{listener(state);}catch(_){}}
   }
   async function managerList(){
@@ -1083,8 +1120,8 @@
     return opts;
   }
   async function managerRun(msg){
-    if(!managerListCache)throw new Error('Load the conversation list again before running actions.');
-    const byKey=new Map(managerListCache.items.map(item=>[managerItemKey(item),item]));
+    if(!managerListCache&&!pendingDeletion)throw new Error('Load the conversation list again before running actions.');
+    const byKey=new Map([...(pendingDeletion?pendingDeletion.items:[]),...(managerListCache?managerListCache.items:[])].map(item=>[managerItemKey(item),item]));
     const tasks=(Array.isArray(msg.actions)?msg.actions:[]).filter(x=>x&&['export','delete','export-delete'].includes(x.action)).map(x=>({requestKey:x.key,item:byKey.get(x.key),action:x.action})).filter(x=>x.item);
     if(!tasks.length)throw new Error('No valid conversation actions were selected.');
     const exportTasks=tasks.filter(x=>x.action==='export'||x.action==='export-delete');
@@ -1126,6 +1163,10 @@
       }
       managerListCache={...managerListCache,items:managerListCache.items.filter(item=>!managerWasDeleted(item))};
     }
+    if(pendingDeletion){
+      pendingDeletion={...pendingDeletion,items:pendingDeletion.items.filter(item=>!managerWasDeleted(item))};
+      if(!pendingDeletion.items.length)pendingDeletion=null;
+    }
     return{exportResult,exportError,deleteResults};
   }
 
@@ -1161,17 +1202,25 @@
     progress:()=>progressState,
     hasCachedList:()=>!!(managerListCache&&managerListCache.complete),
     cachedItems:()=>managerListCache?managerListCache.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt):null,
+    // Conversations exported by the last history export, kept so the user
+    // can choose to delete them afterwards (never automatically).
+    pendingDeletion:()=>pendingDeletion?{format:pendingDeletion.format,count:pendingDeletion.count,failed:pendingDeletion.failed,items:pendingDeletion.items.map(managerSummary).sort((a,b)=>b.updatedAt-a.updatedAt)}:null,
     listConversations:()=>runBusyJob('conversation list',managerList),
     runActions:(actions,options)=>busy&&busyKind==='conversation list'?concurrentListAction(actions,options):runBusyJob('selected conversation actions',()=>managerRun({actions,options})),
     cancel:cancelJob,
     onProgress(listener){progressListeners.add(listener);return()=>progressListeners.delete(listener);}
   };
 
+  // The export is built in this tab's memory: reloading or closing the tab
+  // would lose it, so ask the browser to confirm while a job is running.
+  // Navigating inside ChatGPT does not reload the page and is not affected.
+  addEventListener('beforeunload',event=>{if(!busy)return;event.preventDefault();event.returnValue='';});
+
   api.runtime.onMessage.addListener((msg,_sender,sendResponse)=>{
     if(msg.type==='cgx-cancel-job'){sendResponse(cancelJob());return false;}
     if(msg.type==='cgx-open-picker'){
       if(typeof globalThis.CGX_openPicker!=='function'){sendResponse({ok:false,error:'The conversation picker is not loaded. Reload the ChatGPT tab.'});return false;}
-      globalThis.CGX_openPicker(msg.formats||{},msg.format||'both');
+      globalThis.CGX_openPicker(msg.formats||{},msg.format||'both',{review:!!msg.review});
       sendResponse({ok:true});return false;
     }
     if(msg.type==='cgx-ping'){const t=currentTarget();storageGet('cgx-last-full-export').then(last=>sendResponse({ok:true,busy,hasConversation:!!t,lastExport:last||null,progress:progressState,activity:activityState,failures:liveFailureDetails,lastJob:lastExportState}));return true;}
@@ -1190,7 +1239,13 @@
     job.then(r=>{
       const hasIssues=!!(r.failed||r.imageFailures||r.fileFailures);
       diag('export.complete',{count:r.count||0,failed:r.failed||0,imageFailures:r.imageFailures||0,fileFailures:r.fileFailures||0,parts:r.parts||0});
-      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin};
+      const exportedItems=r.exportedItems||[];delete r.exportedItems;
+      if(msg.type==='cgx-export-all'&&exportedItems.length){
+        pendingDeletion={items:exportedItems,format:opts.format||'both',count:exportedItems.length,failed:r.failed||0};
+        r.reviewCount=exportedItems.length;
+        if(typeof globalThis.CGX_historyExportDone==='function')try{globalThis.CGX_historyExportDone();}catch(_){}
+      }
+      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin,reviewCount:r.reviewCount||0};
       sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
     }).catch(e=>{
       diag('export.failure',{error:e});

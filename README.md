@@ -59,8 +59,10 @@ Firefox uses `background.scripts`, while Chromium-based browsers use `background
 4. Choose what to export:
    - **This conversation**: the chat open in the tab.
    - **Choose conversations…**: opens a large window over ChatGPT where you search, filter by date or location, tick conversations (Shift-click selects a range) and export them. After an export, you can choose to delete the exported conversations from ChatGPT, with a separate confirmation. You can send a running job to the background and keep using ChatGPT.
-   - **Entire history**: everything, or only the N most recent conversations.
+   - **Entire history**: everything, or only the N most recent conversations. When it finishes, a notice in the ChatGPT page (and a button in the popup) lets you review the exported conversations and, if you choose, delete them from ChatGPT after a separate confirmation. Nothing is deleted automatically.
 5. Extra settings are under **Options**; each **i** bubble explains its option.
+
+While an export runs, keep its ChatGPT tab open: the export is built in that tab, so reloading or closing it stops the export (the browser asks for confirmation first). Moving between conversations in that tab is fine. To keep chatting, open ChatGPT in another window. Conversations created during the export are not included, because the list is captured when the export starts.
 
 Settings are stored locally in the popup. History exports may produce multiple ZIP files when the configured maximum size is reached; the default is 1 GiB per archive.
 
@@ -162,6 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.39**
+Current version: **0.6.40**
 
-This version removes em dashes from project text and the extension interface. It also shortens the manifest description to meet the Chrome Web Store's 132-character limit, updates the extension icon, improves selected conversation deletion while a history scan is still running, removes deleted conversations from the picker even if later scan pages contain duplicates, and clarifies that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker builds its fixed interface without assigning to innerHTML, and Firefox minimum versions match the declared manifest capabilities. Selected conversations can still be exported or deleted while the scan continues; only one selected action runs at a time. Deletion remains a separate, explicit step, and only successfully exported conversations are offered for deletion.
+This version adds a post-export review flow for full-history exports, allowing users to review and optionally delete only the conversations exported successfully. It asks for confirmation before a running export is interrupted by reloading or closing its ChatGPT tab, and clarifies that the job needs that tab to stay open. The popup options can expand into a wider layout. The privacy policy now includes the Chrome Web Store Limited Use disclosure and explains session-token handling.
+
+Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.
