@@ -3,4 +3,5 @@ conversations/
 
 # Generated export folders and local build output.
 exports/
+__pycache__/
 
