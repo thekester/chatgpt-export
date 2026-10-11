@@ -84,7 +84,7 @@ Settings are stored locally in the popup. History exports may produce multiple Z
 
 When **Embed media in Markdown (Base64)** is selected as the only save option, the current conversation is downloaded directly as a single `.embedded.md` file, without a ZIP archive. A ZIP is created when another output or save option is enabled. **Keep media as links** leaves remote links unchanged, while **Save images** and **Save attachments and generated files** download local copies and link to them from the Markdown. **Allow external media** only grants permission to download remote resources; it does not enable Base64 embedding.
 
-The standard self-contained format keeps the export as plain Markdown with embedded Base64 resources. The **JEX** format creates a native `.jex` archive with the metadata fields supported by Joplin, including title, creation/update dates, source, author, and tags. Images and files are stored as Joplin resources referenced from the note, instead of putting large Data URIs in the note. The note uses theme-neutral Markdown and follows Joplin’s active light or dark theme.
+The standard self-contained format keeps the export as plain Markdown with embedded Base64 resources. The **JEX** format creates a native `.jex` archive with the metadata fields supported by Joplin, including title, creation/update dates, source, author, and tags. Images and files are stored as Joplin resources referenced from the note, instead of putting large Data URIs in the note. Rich ChatGPT components are preserved as inline HTML in JEX notes where Joplin supports it; simpler content remains Markdown.
 
 Select **JEX** when importing into Joplin. **Export this conversation** creates one `.jex`; **Export all history** creates one `.jex` containing a “ChatGPT conversations” notebook and one note for each successfully exported conversation. Select **File → Import → JEX** in Joplin and import that single file. It includes downloaded images and files as Joplin resources. The standard `.embedded.md` format is intended for readers that handle large Base64 Data URIs reliably, not for large Joplin notes.
 
@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.43**
+Current version: **0.6.44**
 
-This version converts ChatGPT citation components and rich layout blocks into readable Markdown, preserving source links when available and representing charts as text in Joplin exports. JEX questions use Markdown tables rather than styled HTML cards.
+This version preserves ChatGPT rich components more faithfully in Joplin JEX notes, including styled cards, rows, charts, lists, links, and available generated illustrations. Citation links are resolved from conversation data and, for the open conversation, from visible ChatGPT source popovers.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.

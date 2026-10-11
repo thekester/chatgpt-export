@@ -307,7 +307,10 @@
     }).join("\n");
   }
 
-  function preprocessRichComponents(text, refs = [], extraData = null) {
+  function preprocessRichComponents(text, refs = [], extraData = null, ctx = null) {
+    if (extraData && extraData.jexRichHtml) {
+      return preprocessJexRichComponents(text, refs, extraData, ctx);
+    }
     let out = dedentRichComponentMarkup(text);
     out = out.replace(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g, (_match, rawIds) => {
       let ids = [];
@@ -325,12 +328,22 @@
     });
     out = out.replace(/<box\b([^>]*?)\bwidth=["']([\d.]+)%["'][^>]*\/?\s*>/gi, (_match, _attrs, rawPercent) => {
       const percent = Math.max(0, Math.min(100, Number(rawPercent)));
-      const filled = Math.round(percent / 5);
-      return `Progress: ${"█".repeat(filled)}${"░".repeat(20 - filled)} ${percent}%`;
+      return `Relative throughput: ${percent}%`;
     });
+    const asyncImages = extraData && extraData.message && extraData.message.metadata && extraData.message.metadata.cgx_dom_async_images || [];
+    const usedAsyncImages = new Set();
     out = out.replace(/<AsyncImage\b([^>]*)\/?\s*>/gi, (_match, attrs) => {
       const query = attrs.match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1];
-      return query ? `\n\n*Illustration not included: ${query.trim()}*\n\n` : "";
+      let imageIndex = asyncImages.findIndex((candidate, index) => !usedAsyncImages.has(index) && candidate.query === query);
+      if (imageIndex < 0) imageIndex = asyncImages.findIndex((_candidate, index) => !usedAsyncImages.has(index));
+      const image = imageIndex >= 0 ? asyncImages[imageIndex] : null;
+      if (image && image.url && ctx) {
+        usedAsyncImages.add(imageIndex);
+        const placeholder = ctx.image([image.url], false);
+        return `\n\n![${mdLabel(image.alt || "Generated illustration")}](${placeholder})\n\n`;
+      }
+      const alt = image && image.alt || query;
+      return alt ? `\n\n*Illustration unavailable: ${alt.trim()}*\n\n` : "";
     });
     out = out.replace(/<divider\b[^>]*\/?\s*>/gi, "\n\n---\n\n");
     out = out.replace(/<list\b[^>]*\bmarker=["']number["'][^>]*>([\s\S]*?)<\/list>/gi, (_match, body) => {
@@ -342,14 +355,130 @@
     );
     out = out.replace(/<caption\b[^>]*>([\s\S]*?)<\/caption>/gi, (_match, body) => `\n\n*${body.trim()}*\n\n`);
     out = out.replace(/<title\b[^>]*>([\s\S]*?)<\/title>/gi, (_match, body) => `**${body.trim()}**`);
-    out = out.replace(/<row\b[^>]*>([\s\S]*?)<\/row>/gi, (_match, body) => `\n\n${body.trim().replace(/\s*\n\s*/g, " — ")}\n\n`);
+    out = out.replace(/<row\b([^>]*)>([\s\S]*?)<\/row>/gi, (_match, attrs, body) => {
+      if (/\bjustify=["']between["']/i.test(attrs) && !/<(?:AsyncImage|list)\b/i.test(body)) {
+        const inline = body.trim().replace(/\s*\n\s*/g, " | ").replace(/(?:\s*\|\s*){2,}/g, " | ").replace(/\s+/g, " ");
+        return `\n\n${inline}\n\n`;
+      }
+      return `\n${body.trim()}\n`;
+    });
     out = out.replace(/<\/?(?:box|text)\b[^>]*>/gi, "\n");
     out = out.replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n");
     return out;
   }
 
-  function preprocessWritingBlocks(text, refs = [], extraData = null) {
-    return preprocessRichComponents(text, refs, extraData).replace(/:::writing\{([^}]*)\}\s*([\s\S]*?)\s*:::/g, (_m, meta, body) => {
+  // Keep ChatGPT's rich cards in Joplin's Markdown note as ordinary inline
+  // HTML. Joplin renders HTML inside Markdown notes, and JEX resource paths
+  // are rewritten later by content.js just like Markdown image paths.
+  function preprocessJexRichComponents(text, refs = [], extraData = null, ctx = null) {
+    let source = dedentRichComponentMarkup(text);
+    const generatedHtml = new Map();
+    const keepHtml = (value) => {
+      const token = `CGXJEXHTML${generatedHtml.size}Z`;
+      generatedHtml.set(token, value);
+      return token;
+    };
+    source = source.replace(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g, (_m, raw) => {
+      let ids = []; try { ids = JSON.parse(raw); } catch (_) {}
+      const links = resolveCitationLinks(ids, refs, extraData);
+      return links.length ? links.map((link) => `[${mdLabel(link.title || link.label)}](${mdUrl(link.url)})`).join(" · ") : "";
+    });
+    const asyncImages = extraData?.message?.metadata?.cgx_dom_async_images || [];
+    const usedImages = new Set();
+    source = source.replace(/<AsyncImage\b([^>]*)\/?\s*>/gi, (_m, attrs) => {
+      const query = attrs.match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1];
+      let index = asyncImages.findIndex((item, i) => !usedImages.has(i) && item.query === query);
+      if (index < 0) index = asyncImages.findIndex((_item, i) => !usedImages.has(i));
+      const image = index >= 0 ? asyncImages[index] : null;
+      if (!image?.url || !ctx) return image?.alt || query || "";
+      usedImages.add(index);
+      const maxWidthRaw = attrs.match(/\bmaxWidth\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+      const maxWidth = /^(?:\d+(?:\.\d+)?)(?:px|em|rem|%)$/.test(maxWidthRaw) ? maxWidthRaw : "";
+      const ratioRaw = attrs.match(/\baspectRatio\s*=\s*["']([^"']+)["']/i)?.[1] || "";
+      const ratioMatch = ratioRaw.match(/^(\d+(?:\.\d+)?):(\d+(?:\.\d+)?)$/);
+      const ratio = ratioMatch ? `${ratioMatch[1]}/${ratioMatch[2]}` : "";
+      return keepHtml(`<img src="${ctx.image([image.url], false)}" alt="${esc(image.alt || query || "Generated illustration")}" style="display:block;width:100%;${maxWidth ? `max-width:${maxWidth};` : ""}${ratio ? `aspect-ratio:${ratio};` : ""}height:auto;object-fit:cover;border-radius:12px;">`);
+    });
+    source = source.replace(/\{#each\s+Array\.from\(\{\s*length\s*:\s*(\d+)\s*\}\)[\s\S]*?\{\/each\}/g, (block, countText) => {
+      const count = Number(countText);
+      const highlighted = new Set([...block.matchAll(/i\s*===\s*(\d+)/g)].map((m) => Number(m[1])));
+      const percent = count ? Math.round(Math.min(count, highlighted.size) * 100 / count) : 0;
+      return keepHtml(`<div style="display:flex;gap:3px;margin:8px 0;">${Array.from({length:Math.min(count, 60)}, (_x, i) => `<span style="display:block;flex:1;height:12px;border-radius:2px;background:${highlighted.has(i) ? "#16A34A" : "#64748B"};opacity:${highlighted.has(i) ? "1" : ".3"};"></span>`).join("")}</div><small>${percent}% highlighted (${highlighted.size} of ${count})</small>`);
+    });
+
+    const cssLength = (value) => {
+      if (/^\d+(?:\.\d+)?$/.test(value || "")) return `${Number(value) * 4}px`;
+      return /^(?:\d+(?:\.\d+)?)(?:px|em|rem|%)$/.test(value || "") ? value : "";
+    };
+    const stylesFor = (tag, attrs) => {
+      const get = (name) => attrs.match(new RegExp(`\\b${name}\\s*=\\s*(?:["']([^"']*)["']|\\{([^}]*)\\})`, "i"))?.slice(1).find((value) => value != null) || "";
+      if (tag === "box") {
+        const styles = ["box-sizing:border-box", "display:flex", "flex-direction:column"];
+        const gap = get("gap"); if (gap) styles.push(`gap:${cssLength(gap) || `calc(var(--spacing, 1rem) * ${Number(gap) || 1})`}`);
+        if (/\bborder(?:\s|=|$)/i.test(attrs) && get("border") !== "false") styles.push("border:1px solid #3f3f46");
+        if (get("radius")) styles.push(`border-radius:${get("radius") === "full" ? "9999px" : "12px"}`);
+        if (get("padding") || get("p")) styles.push(`padding:${cssLength(get("padding") || get("p")) || "16px"}`);
+        if (get("background")) styles.push(`background:${get("background").includes("tertiary") ? "#27272a" : /^#[0-9a-f]{3,8}$/i.test(get("background")) ? get("background") : "transparent"}`);
+        if (get("flex")) styles.push(`flex:${/^\d+(?:\.\d+)?$/.test(get("flex")) ? get("flex") : cssLength(get("flex"))}`);
+        if (get("width")) styles.push(`width:${cssLength(get("width"))}`);
+        if (get("height")) styles.push(`height:${cssLength(get("height"))}`);
+        if (/\bclip\b/i.test(attrs)) styles.push("overflow:hidden");
+        return styles.join(";");
+      }
+      if (tag === "row") return `display:flex;align-items:${get("align") === "start" ? "flex-start" : "center"};justify-content:${get("justify") === "between" ? "space-between" : "flex-start"};gap:${cssLength(get("gap")) || "12px"};flex-wrap:wrap`;
+      if (tag === "divider") return "border:0;border-top:1px solid #3f3f46;margin:16px 0";
+      if (tag === "title") return `font-size:${get("size") === "lg" ? "1.15em" : "1em"};font-weight:700;color:${get("color") === "success" ? "#22c55e" : "inherit"}`;
+      if (tag === "text" || tag === "caption") return `color:${get("color") === "secondary" ? "#a1a1aa" : "inherit"};font-size:${get("size") === "sm" ? ".9em" : "inherit"}`;
+      if (tag === "code") return "font-family:monospace;background:#27272a;padding:2px 5px;border-radius:4px";
+      return "";
+    };
+    const tagRe = /<(\/?)(box|row|text|title|divider|caption|list|list-item|bold|italic|code|link)\b([^>]*?)\s*(\/?)>/gi;
+    let html = "", cursor = 0;
+    const renderText = (chunk) => {
+      if (!chunk) return "";
+      let s = esc(chunk).replace(/\*\*(.+?)\*\*/gs, "<strong>$1</strong>").replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, "<em>$1</em>");
+      s = s.replace(/\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g, (_m, label, url) => `<a href="${esc(url)}">${label}</a>`);
+      return s.split(/\n{2,}/).map((paragraph) => {
+        const lines = paragraph.split("\n"), parts = [];
+        let bullets = [];
+        const flushBullets = () => {
+          if (bullets.length) parts.push(`<ul style="margin:8px 0;padding-left:1.4em;">${bullets.map((line) => `<li style="margin:4px 0;">${line.replace(/^\s*[-*]\s+/, "")}</li>`).join("")}</ul>`);
+          bullets = [];
+        };
+        let prose = [];
+        const flushProse = () => { if (prose.length) parts.push(prose.join("<br>")); prose = []; };
+        for (const line of lines) {
+          if (/^\s*[-*]\s+/.test(line)) { flushProse(); bullets.push(line); }
+          else { flushBullets(); if (line.trim()) prose.push(line.trim()); }
+        }
+        flushProse(); flushBullets();
+        return parts.join("");
+      }).filter(Boolean).join("\n");
+    };
+    for (const match of source.matchAll(tagRe)) {
+      const [raw, closing, tagName, rawAttrs, selfClosing] = match;
+      html += renderText(source.slice(cursor, match.index));
+      const tag = tagName.toLowerCase();
+      const attrs = rawAttrs || "";
+      if (tag === "divider") html += `<hr style="${stylesFor(tag, attrs)}">`;
+      else if (closing) html += `</${tag === "row" || tag === "box" ? "div" : tag === "caption" ? "p" : tag === "list-item" ? "li" : tag === "list" ? "ul" : tag === "bold" ? "strong" : tag === "italic" ? "em" : tag === "code" ? "code" : tag === "link" ? "a" : "span"}>`;
+      else {
+        const element = tag === "row" || tag === "box" ? "div" : tag === "caption" ? "p" : tag === "list" ? "ul" : tag === "list-item" ? "li" : tag === "bold" ? "strong" : tag === "italic" ? "em" : tag === "code" ? "code" : tag === "link" ? "a" : "span";
+        const href = tag === "link" ? attrs.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1] : "";
+        const safeHref = href && /^(?:https?:\/\/|mailto:|#)/i.test(href) ? ` href="${esc(href)}"` : "";
+        html += `<${element}${safeHref}${stylesFor(tag, attrs) ? ` style="${stylesFor(tag, attrs)}"` : ""}>`;
+        if (selfClosing) html += `</${element}>`;
+      }
+      cursor = match.index + raw.length;
+    }
+    html += renderText(source.slice(cursor));
+    html = html.replace(/(?:\s*<br>\s*){3,}/g, "<br><br>");
+    for (const [token, markup] of generatedHtml) html = html.split(token).join(markup);
+    return html;
+  }
+
+  function preprocessWritingBlocks(text, refs = [], extraData = null, ctx = null) {
+    return preprocessRichComponents(text, refs, extraData, ctx).replace(/:::writing\{([^}]*)\}\s*([\s\S]*?)\s*:::/g, (_m, meta, body) => {
       const attrs = {};
       for (const m of meta.matchAll(/([a-zA-Z_]+)="([^"]*)"/g)) attrs[m[1]] = m[2];
       const label = attrs.subject || attrs.title || attrs.variant || "Writing block";
@@ -371,7 +500,7 @@
   }
 
   function renderRichText(text, refs, ctx, messageId = null, metadata = null) {
-    text = preprocessWritingBlocks(text, refs, metadata);
+    text = preprocessWritingBlocks(text, refs, metadata, ctx);
     // Sandbox links are files generated by ChatGPT. Replace them with a file
     // marker so content.js can try sandbox endpoints, then keep the original
     // link if no endpoint is available for the account.
@@ -540,6 +669,7 @@
         const r = renderRichText(text, refs, ctx, msg.id || null, {
           message: msg,
           conversation: options.citationData || null,
+          jexRichHtml: !!options.jexRichHtml,
         });
         if (r.md) mdParts.push(r.md);
         if (r.html.trim()) htmlParts.push(r.html);

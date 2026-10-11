@@ -712,8 +712,8 @@
 
   const waitForDom = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-  // DIL source popovers expose citation URLs as anchor hrefs, including builds
-  // where those URLs are absent from the conversation API response.
+  // Resolve source links and AsyncImage assets from the rendered DIL components
+  // when ChatGPT omits their bindings from the conversation API response.
   async function bindVisibleCitationUrls(conv) {
     if (!conv || !conv.mapping) return 0;
     const byId = new Map(Object.values(conv.mapping).filter((node) => node && node.message).map((node) => [node.message.id, node.message]));
@@ -729,34 +729,50 @@
         .filter((part) => typeof part === 'string').join('\n');
       const refsByPopover = [...text.matchAll(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g)]
         .map((match) => { try { return JSON.parse(match[1]).map(String); } catch (_) { return []; } });
-      if (!refsByPopover.length) continue;
-      const triggers = [...host.querySelectorAll('[data-d-component="popover-trigger"][aria-haspopup="dialog"]')]
-        .filter((trigger) => trigger.querySelector('[data-d-component="badge"]'));
-      const bindings = {};
-      for (let index = 0; index < Math.min(triggers.length, refsByPopover.length); index++) {
-        checkCancelled();
-        const trigger = triggers[index];
-        const wasExpanded = trigger.getAttribute('aria-expanded') === 'true';
-        if (!wasExpanded) { trigger.click(); await waitForDom(50); }
-        const controlledId = trigger.getAttribute('aria-controls');
-        const popover = (controlledId && document.getElementById(controlledId)) ||
-          [...document.querySelectorAll('[role="dialog"]')].find((element) => element.querySelector('a[href]'));
-        const links = popover ? [...popover.querySelectorAll('a[href]')].map((anchor) => {
-          const url = anchor.href;
-          if (!/^https?:\/\//i.test(url) || !CGX.isArchiveSafeUrl(url)) return null;
-          const title = (anchor.innerText || anchor.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
-          return { url, title, label: title || new URL(url).hostname.replace(/^www\./, '') };
-        }).filter(Boolean) : [];
-        if (!wasExpanded) trigger.click();
-        if (!links.length) continue;
-        for (const refId of refsByPopover[index]) {
-          bindings[refId] = [...(bindings[refId] || []), ...links];
-          added += links.length;
+      if (refsByPopover.length) {
+        const triggers = [...host.querySelectorAll('[data-d-component="popover-trigger"][aria-haspopup="dialog"]')]
+          .filter((trigger) => trigger.querySelector('[data-d-component="badge"]'));
+        const bindings = {};
+        for (let index = 0; index < Math.min(triggers.length, refsByPopover.length); index++) {
+          checkCancelled();
+          const trigger = triggers[index];
+          const wasExpanded = trigger.getAttribute('aria-expanded') === 'true';
+          if (!wasExpanded) { trigger.click(); await waitForDom(50); }
+          const controlledId = trigger.getAttribute('aria-controls');
+          const popover = (controlledId && document.getElementById(controlledId)) ||
+            [...document.querySelectorAll('[role="dialog"]')].find((element) => element.querySelector('a[href]'));
+          const links = popover ? [...popover.querySelectorAll('a[href]')].map((anchor) => {
+            const url = anchor.href;
+            if (!/^https?:\/\//i.test(url) || !CGX.isArchiveSafeUrl(url)) return null;
+            const title = (anchor.innerText || anchor.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+            return { url, title, label: title || new URL(url).hostname.replace(/^www\./, '') };
+          }).filter(Boolean) : [];
+          if (!wasExpanded) trigger.click();
+          if (!links.length) continue;
+          for (const refId of refsByPopover[index]) {
+            bindings[refId] = [...(bindings[refId] || []), ...links];
+            added += links.length;
+          }
+        }
+        if (Object.keys(bindings).length) {
+          message.metadata = message.metadata || {};
+          message.metadata.cgx_dom_citation_bindings = bindings;
         }
       }
-      if (Object.keys(bindings).length) {
-        message.metadata = message.metadata || {};
-        message.metadata.cgx_dom_citation_bindings = bindings;
+
+      const queries = [...text.matchAll(/<AsyncImage\b([^>]*)\/?\s*>/gi)].map((match) => {
+        return match[1].match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1] || '';
+      });
+      if (queries.length) {
+        const images = [...host.querySelectorAll('[data-d-component="image"] img[src]')].map((image) => ({
+          url: image.src,
+          alt: (image.alt || '').trim(),
+        })).filter((image) => /^https?:\/\//i.test(image.url) && CGX.isArchiveSafeUrl(image.url));
+        if (images.length) {
+          message.metadata = message.metadata || {};
+          message.metadata.cgx_dom_async_images = queries.slice(0, images.length).map((query, index) => ({ ...images[index], query }));
+          added += Math.min(queries.length, images.length);
+        }
       }
     }
     if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === 'function') {
@@ -779,15 +795,15 @@
         const conv=data.conversation||data;
         const cid=conv.conversation_id||conv.id||target.id;
         try {
-          const citationCount=await bindVisibleCitationUrls(conv);
-          if(citationCount)diag('citations.dom-resolved',{links:citationCount});
+          const componentCount=await bindVisibleCitationUrls(conv);
+          if(componentCount)diag('rich-content.dom-resolved',{items:componentCount});
         } catch(e) { checkCancelled(); diag('citations.dom-resolution-failed',{error:e}); }
         r=await exportConversation(cid,opts,'',{accountId,shared:true,shareId:target.id},conv,(p,label)=>progressPercent(5+p*0.9,label));
       } else {
         const conv=await apiGet(`/backend-api/conversation/${encodeURIComponent(target.id)}`,accountId);
         try {
-          const citationCount=await bindVisibleCitationUrls(conv);
-          if(citationCount)diag('citations.dom-resolved',{links:citationCount});
+          const componentCount=await bindVisibleCitationUrls(conv);
+          if(componentCount)diag('rich-content.dom-resolved',{items:componentCount});
         } catch(e) { checkCancelled(); diag('citations.dom-resolution-failed',{error:e}); }
         r=await exportConversation(target.id,opts,'',{accountId},conv,(p,label)=>progressPercent(5+p*0.9,label));
       }
@@ -1026,7 +1042,7 @@
           }
           // Joplin's Markdown parser handles tables more reliably than the
           // styled HTML question cards used by standalone Markdown exports.
-          const jexOpts={...opts,md:true,mdHtml:false,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
+          const jexOpts={...opts,md:true,mdHtml:false,jexRichHtml:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
           const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
           checkCancelled();entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
