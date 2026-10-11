@@ -326,8 +326,13 @@
       const filled = count ? Math.round(Math.min(count, highlighted.size) * 12 / count) : 0;
       return `\n\nDiagram: ${"█".repeat(filled)}${"░".repeat(12 - filled)} (${highlighted.size} of ${count} blocks highlighted).\n\n`;
     });
-    out = out.replace(/<box\b([^>]*?)\bwidth=["']([\d.]+)%["'][^>]*\/?\s*>/gi, (_match, _attrs, rawPercent) => {
+    out = out.replace(/<box\b([^>]*?)\bwidth=["']([\d.]+)%["'][^>]*\/?\s*>/gi, (_match, attrs, rawPercent) => {
       const percent = Math.max(0, Math.min(100, Number(rawPercent)));
+      if (extraData && extraData.jexCompactHtml) {
+        const rawColor = attrs.match(/\bbackground=["']([^"']+)["']/i)?.[1] || "#64748B";
+        const color = /^#[0-9a-f]{3,8}$/i.test(rawColor) ? rawColor : "#64748B";
+        return `\n\n<div style="height:8px;width:100%;border-radius:999px;background:linear-gradient(90deg,${color} ${percent}%,#27272a ${percent}%);"></div>\n\n`;
+      }
       return `Relative throughput: ${percent}%`;
     });
     const asyncImages = extraData && extraData.message && extraData.message.metadata && extraData.message.metadata.cgx_dom_async_images || [];
@@ -357,7 +362,7 @@
     out = out.replace(/<title\b[^>]*>([\s\S]*?)<\/title>/gi, (_match, body) => `**${body.trim()}**`);
     out = out.replace(/<row\b([^>]*)>([\s\S]*?)<\/row>/gi, (_match, attrs, body) => {
       if (/\bjustify=["']between["']/i.test(attrs) && !/<(?:AsyncImage|list)\b/i.test(body)) {
-        const inline = body.trim().replace(/\s*\n\s*/g, " | ").replace(/(?:\s*\|\s*){2,}/g, " | ").replace(/\s+/g, " ");
+        const inline = body.trim().replace(/\*\*\*\*/g, "** | **").replace(/\s*\n\s*/g, " | ").replace(/(?:\s*\|\s*){2,}/g, " | ").replace(/\s+/g, " ");
         return `\n\n${inline}\n\n`;
       }
       return `\n${body.trim()}\n`;
@@ -670,6 +675,7 @@
           message: msg,
           conversation: options.citationData || null,
           jexRichHtml: !!options.jexRichHtml,
+          jexCompactHtml: !!options.jexCompactHtml,
         });
         if (r.md) mdParts.push(r.md);
         if (r.html.trim()) htmlParts.push(r.html);

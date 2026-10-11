@@ -720,6 +720,14 @@
     const previousFocus = document.activeElement;
     const visibleImages = new Map();
     let added = 0;
+    // DIL wrappers differ between standard conversations and shared pages.
+    // Keep a global image-source fallback for rendered OpenAI image results.
+    for (const image of document.querySelectorAll('img[src*="images.openai.com"], img[src*="oaiusercontent.com"]')) {
+      const url = image.currentSrc || image.src;
+      if (/^https?:\/\//i.test(url) && CGX.isArchiveSafeUrl(url) && !visibleImages.has(url)) {
+        visibleImages.set(url, {url,alt:(image.alt||'').trim()});
+      }
+    }
     for (const messageEl of document.querySelectorAll('[data-message-author-role="assistant"]')) {
       checkCancelled();
       const host = messageEl.closest('article') || messageEl.closest('[data-testid^="conversation-turn"]') || messageEl;
@@ -1084,7 +1092,7 @@
           }
           // Joplin's Markdown parser handles tables more reliably than the
           // styled HTML question cards used by standalone Markdown exports.
-          const jexOpts={...opts,md:true,mdHtml:false,jexRichHtml:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
+          const jexOpts={...opts,md:true,mdHtml:false,jexRichHtml:false,jexCompactHtml:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
           const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
           checkCancelled();entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
@@ -1271,7 +1279,8 @@
   function defaultExportOptions(options={}){
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...options};
     opts.modernEmbeddedMd=opts.format==='jex'||!!opts.modernEmbeddedMd;
-    opts.jexRichHtml=opts.format==='jex'||!!opts.jexRichHtml;
+    opts.jexRichHtml=!!opts.jexRichHtml && opts.format!=='jex';
+    opts.jexCompactHtml=opts.format==='jex'||!!opts.jexCompactHtml;
     opts.embeddedMd=!!(opts.embeddedMd||opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md)opts.md=true;
     return opts;
@@ -1387,7 +1396,8 @@
     if(busy){sendResponse({ok:false,error:'An export is already running in this tab.',diagnostics:diagnosticSnapshot({error:{message:'Export already running.'}})});return false;}
     const opts={md:true,html:true,images:true,files:true,json:false,thinking:false,embeddedMd:false,modernEmbeddedMd:false,branches:false,checksums:true,incremental:false,partSizeMB:1024,...(msg.options||{})};
     opts.modernEmbeddedMd = opts.format === 'jex' || !!opts.modernEmbeddedMd;
-    opts.jexRichHtml = opts.format === 'jex' || !!opts.jexRichHtml;
+    opts.jexRichHtml = !!opts.jexRichHtml && opts.format !== 'jex';
+    opts.jexCompactHtml = opts.format === 'jex' || !!opts.jexCompactHtml;
     opts.embeddedMd = !!(opts.embeddedMd || opts.modernEmbeddedMd);
     if(opts.embeddedMd&&!opts.md) opts.md=true;
     resetDiagnostics(msg.type,opts);

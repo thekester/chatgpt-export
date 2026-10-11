@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.46**
+Current version: **0.6.47**
 
-This version improves recovery of generated illustrations in JEX exports, including shared pages where visible image components may not have matching message IDs in the conversation data. Rich component rendering works for single-conversation and full-history JEX exports.
+This version keeps JEX notes Markdown-first to avoid cluttering Joplin's source editor, while retaining compact HTML progress bars and recovering visible generated illustrations from shared pages.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.
