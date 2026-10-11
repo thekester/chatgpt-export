@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.41**
+Current version: **0.6.42**
 
-This version adds an upfront choice to automatically delete conversations that export successfully during a full-history export. Deletion requires a second acknowledgement in the initial dialog, begins after export files are created and downloads are started, and does not ask again when the export finishes. It also reports deletion failures and keeps failed exports undeleted.
+This version converts ChatGPT citation components and rich layout blocks into readable Markdown, preserving source links when available and representing charts as text in Joplin exports. JEX questions use Markdown tables rather than styled HTML cards.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.

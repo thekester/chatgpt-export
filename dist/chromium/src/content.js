@@ -958,7 +958,9 @@
           if(item._cgxShared && !item.mapping && item._cgxShareId){
             try{const sd=await apiGet(`/backend-api/share/${encodeURIComponent(item._cgxShareId)}`,accountId);convOverride=sd.conversation||sd;}catch(e){checkCancelled();}
           }
-          const jexOpts={...opts,md:true,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
+          // Joplin's Markdown parser handles tables more reliably than the
+          // styled HTML question cards used by standalone Markdown exports.
+          const jexOpts={...opts,md:true,mdHtml:false,html:false,images:true,files:true,json:false,embeddedMd:true,modernEmbeddedMd:true,branches:false};
           const r=await exportConversation(id,jexOpts,'',{projectId:item._cgxProjectId,projectTitle:item._cgxProjectTitle,archived:item._cgxArchived,shared:item._cgxShared,shareId:item._cgxShareId,accountId},convOverride);
           checkCancelled();entries.push(...buildJexEntries(r.conv,r.files,notebookId));
           exported++;
