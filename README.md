@@ -164,7 +164,7 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.42**
+Current version: **0.6.43**
 
 This version converts ChatGPT citation components and rich layout blocks into readable Markdown, preserving source links when available and representing charts as text in Joplin exports. JEX questions use Markdown tables rather than styled HTML cards.
 

@@ -710,6 +710,61 @@
     return {id:targetId||`dom-${Date.now()}`,conversation_id:targetId||`dom-${Date.now()}`,title:document.title.replace(/\s*[|·-]\s*ChatGPT.*$/i,'')||'Conversation ChatGPT',create_time:null,update_time:null,current_node:parent,mapping};
   }
 
+  const waitForDom = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  // DIL source popovers expose citation URLs as anchor hrefs, including builds
+  // where those URLs are absent from the conversation API response.
+  async function bindVisibleCitationUrls(conv) {
+    if (!conv || !conv.mapping) return 0;
+    const byId = new Map(Object.values(conv.mapping).filter((node) => node && node.message).map((node) => [node.message.id, node.message]));
+    const previousFocus = document.activeElement;
+    let added = 0;
+    for (const messageEl of document.querySelectorAll('[data-message-author-role="assistant"]')) {
+      checkCancelled();
+      const host = messageEl.closest('article') || messageEl.closest('[data-testid^="conversation-turn"]') || messageEl;
+      const id = host.getAttribute('data-message-id') || messageEl.getAttribute('data-message-id') || host.querySelector('[data-message-id]')?.getAttribute('data-message-id');
+      const message = id && byId.get(id);
+      if (!message) continue;
+      const text = (message.content && Array.isArray(message.content.parts) ? message.content.parts : [])
+        .filter((part) => typeof part === 'string').join('\n');
+      const refsByPopover = [...text.matchAll(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g)]
+        .map((match) => { try { return JSON.parse(match[1]).map(String); } catch (_) { return []; } });
+      if (!refsByPopover.length) continue;
+      const triggers = [...host.querySelectorAll('[data-d-component="popover-trigger"][aria-haspopup="dialog"]')]
+        .filter((trigger) => trigger.querySelector('[data-d-component="badge"]'));
+      const bindings = {};
+      for (let index = 0; index < Math.min(triggers.length, refsByPopover.length); index++) {
+        checkCancelled();
+        const trigger = triggers[index];
+        const wasExpanded = trigger.getAttribute('aria-expanded') === 'true';
+        if (!wasExpanded) { trigger.click(); await waitForDom(50); }
+        const controlledId = trigger.getAttribute('aria-controls');
+        const popover = (controlledId && document.getElementById(controlledId)) ||
+          [...document.querySelectorAll('[role="dialog"]')].find((element) => element.querySelector('a[href]'));
+        const links = popover ? [...popover.querySelectorAll('a[href]')].map((anchor) => {
+          const url = anchor.href;
+          if (!/^https?:\/\//i.test(url) || !CGX.isArchiveSafeUrl(url)) return null;
+          const title = (anchor.innerText || anchor.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim();
+          return { url, title, label: title || new URL(url).hostname.replace(/^www\./, '') };
+        }).filter(Boolean) : [];
+        if (!wasExpanded) trigger.click();
+        if (!links.length) continue;
+        for (const refId of refsByPopover[index]) {
+          bindings[refId] = [...(bindings[refId] || []), ...links];
+          added += links.length;
+        }
+      }
+      if (Object.keys(bindings).length) {
+        message.metadata = message.metadata || {};
+        message.metadata.cgx_dom_citation_bindings = bindings;
+      }
+    }
+    if (previousFocus && previousFocus.isConnected && typeof previousFocus.focus === 'function') {
+      try { previousFocus.focus({ preventScroll: true }); } catch (_) { /* best-effort */ }
+    }
+    return added;
+  }
+
   async function exportCurrent(opts){
     progressPercent(1,'Starting export…');
     const target=currentTarget(); if(!target){const e=new Error('No conversation or shared page is open.');diag('target.missing',{path:safeDiagnosticPath()});throw e;}
@@ -723,8 +778,19 @@
         setCapability('share_current','available');
         const conv=data.conversation||data;
         const cid=conv.conversation_id||conv.id||target.id;
+        try {
+          const citationCount=await bindVisibleCitationUrls(conv);
+          if(citationCount)diag('citations.dom-resolved',{links:citationCount});
+        } catch(e) { checkCancelled(); diag('citations.dom-resolution-failed',{error:e}); }
         r=await exportConversation(cid,opts,'',{accountId,shared:true,shareId:target.id},conv,(p,label)=>progressPercent(5+p*0.9,label));
-      } else r=await exportConversation(target.id,opts,'',{accountId},null,(p,label)=>progressPercent(5+p*0.9,label));
+      } else {
+        const conv=await apiGet(`/backend-api/conversation/${encodeURIComponent(target.id)}`,accountId);
+        try {
+          const citationCount=await bindVisibleCitationUrls(conv);
+          if(citationCount)diag('citations.dom-resolved',{links:citationCount});
+        } catch(e) { checkCancelled(); diag('citations.dom-resolution-failed',{error:e}); }
+        r=await exportConversation(target.id,opts,'',{accountId},conv,(p,label)=>progressPercent(5+p*0.9,label));
+      }
       setCapability('conversation_api','available');
     } catch (e) {
       checkCancelled();

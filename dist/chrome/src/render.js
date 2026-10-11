@@ -228,7 +228,47 @@
 
   // Returns { md, html }: markers are replaced with Markdown on one side,
   // and CGXT<n>Z tokens (converted to HTML after marked) on the other.
-  function resolveCitationLinks(ids, refs) {
+  function linksInData(value, out = [], depth = 0) {
+    if (value == null || depth > 12) return out;
+    if (Array.isArray(value)) {
+      for (const child of value) linksInData(child, out, depth + 1);
+    } else if (typeof value === "object") {
+      const url = value.url || value.link || value.href || value.canonical_url;
+      if (typeof url === "string" && /^https?:\/\//i.test(url) && isArchiveSafeUrl(url)) {
+        out.push({ url: cleanUrl(url), title: value.title || value.name || "", label: value.attribution || hostOf(url) || value.title || "source" });
+      } else {
+        for (const child of Object.values(value)) linksInData(child, out, depth + 1);
+      }
+    }
+    return out;
+  }
+
+  function citationLinksFromData(ids, data) {
+    const wanted = Array.isArray(ids) ? ids.map(String) : [];
+    const found = [];
+    const seen = new Set();
+    const add = (items) => {
+      for (const link of items) if (!seen.has(link.url)) { seen.add(link.url); found.push(link); }
+    };
+    const walk = (value, key = "", depth = 0) => {
+      if (value == null || depth > 12) return;
+      if (Array.isArray(value)) {
+        value.forEach((child, index) => walk(child, String(index), depth + 1));
+        return;
+      }
+      if (typeof value !== "object") return;
+      const directValues = Object.values(value).filter((child) => typeof child === "string");
+      if (wanted.some((id) => key === id || key.includes(id) || directValues.includes(id))) {
+        add(linksInData(value));
+        return;
+      }
+      for (const [childKey, child] of Object.entries(value)) walk(child, childKey, depth + 1);
+    };
+    walk(data);
+    return found;
+  }
+
+  function resolveCitationLinks(ids, refs, extraData = null) {
     const wanted = Array.isArray(ids) ? ids.map(String) : [];
     const matched = (refs || []).filter((ref) => {
       let serialized = "";
@@ -237,39 +277,56 @@
     });
     const collect = (list) => {
       const seen = new Set();
-      return list.flatMap((ref) => linkItems(ref)).filter((link) => {
+      return list.flatMap((ref) => [...linkItems(ref), ...linksInData(ref)]).filter((link) => {
         if (seen.has(link.url)) return false;
         seen.add(link.url);
         return true;
       });
     };
-    const exact = collect(matched);
+    const exact = [...citationLinksFromData(wanted, extraData), ...collect(matched)];
+    const uniqueExact = exact.filter((link, index, list) => list.findIndex((item) => item.url === link.url) === index);
     // Some ChatGPT builds keep citation URLs on a grouped reference object
     // without retaining the turn/search ID. In that case, preserve the URLs
     // exposed by this message rather than leaking opaque turn IDs into notes.
-    return exact.length ? exact : collect(refs || []);
+    return uniqueExact.length ? uniqueExact : collect(refs || []);
   }
 
-  function preprocessRichComponents(text, refs = []) {
-    let out = String(text || "");
+  function dedentRichComponentMarkup(text) {
+    const lines = String(text || "").split("\n");
+    const componentTag = /<\/?(box|row|text|title|divider|caption|list|list-item)\b[^>]*>/gi;
+    let depth = 0;
+    return lines.map((line) => {
+      const insideComponent = depth > 0;
+      const normalized = insideComponent ? line.trimStart() : line;
+      for (const match of line.matchAll(componentTag)) {
+        const tag = match[0];
+        if (/^<\//.test(tag)) depth = Math.max(0, depth - 1);
+        else if (!/\/>$/.test(tag)) depth += 1;
+      }
+      return normalized;
+    }).join("\n");
+  }
+
+  function preprocessRichComponents(text, refs = [], extraData = null) {
+    let out = dedentRichComponentMarkup(text);
     out = out.replace(/<Cite\b[^>]*\brefs=\{(\[[\s\S]*?\])\}\s*\/?\s*>/g, (_match, rawIds) => {
       let ids = [];
       try { ids = JSON.parse(rawIds); } catch (_) {}
-      const links = resolveCitationLinks(ids, refs);
+      const links = resolveCitationLinks(ids, refs, extraData);
       if (links.length) return ` (Sources: ${links.map((link) => `[${mdLabel(link.title || link.label)}](${mdUrl(link.url)})`).join(", ")})`;
-      return " (Sources cited in ChatGPT; their URLs were not included in the conversation data.)";
+      return " (Citation links could not be resolved from the data available to the exporter.)";
     });
 
     out = out.replace(/\{#each\s+Array\.from\(\{\s*length\s*:\s*(\d+)\s*\}\)[\s\S]*?\{\/each\}/g, (block, rawCount) => {
       const count = Number(rawCount);
       const highlighted = new Set([...block.matchAll(/i\s*===\s*(\d+)/g)].map((match) => Number(match[1])));
       const filled = count ? Math.round(Math.min(count, highlighted.size) * 12 / count) : 0;
-      return `\n\n\`${"█".repeat(filled)}${"░".repeat(12 - filled)}\` *Diagram: ${highlighted.size} of ${count} blocks highlighted.*\n\n`;
+      return `\n\nDiagram: ${"█".repeat(filled)}${"░".repeat(12 - filled)} (${highlighted.size} of ${count} blocks highlighted).\n\n`;
     });
     out = out.replace(/<box\b([^>]*?)\bwidth=["']([\d.]+)%["'][^>]*\/?\s*>/gi, (_match, _attrs, rawPercent) => {
       const percent = Math.max(0, Math.min(100, Number(rawPercent)));
       const filled = Math.round(percent / 5);
-      return `\`${"█".repeat(filled)}${"░".repeat(20 - filled)}\` ${percent}%`;
+      return `Progress: ${"█".repeat(filled)}${"░".repeat(20 - filled)} ${percent}%`;
     });
     out = out.replace(/<AsyncImage\b([^>]*)\/?\s*>/gi, (_match, attrs) => {
       const query = attrs.match(/\bquery\s*=\s*["']([^"']*)["']/i)?.[1];
@@ -285,13 +342,14 @@
     );
     out = out.replace(/<caption\b[^>]*>([\s\S]*?)<\/caption>/gi, (_match, body) => `\n\n*${body.trim()}*\n\n`);
     out = out.replace(/<title\b[^>]*>([\s\S]*?)<\/title>/gi, (_match, body) => `**${body.trim()}**`);
-    out = out.replace(/<\/?(?:box|row|text)\b[^>]*>/gi, (tag) => /^<\//.test(tag) ? "\n" : "\n");
+    out = out.replace(/<row\b[^>]*>([\s\S]*?)<\/row>/gi, (_match, body) => `\n\n${body.trim().replace(/\s*\n\s*/g, " — ")}\n\n`);
+    out = out.replace(/<\/?(?:box|text)\b[^>]*>/gi, "\n");
     out = out.replace(/\n[ \t]*\n(?:[ \t]*\n)+/g, "\n\n");
     return out;
   }
 
-  function preprocessWritingBlocks(text, refs = []) {
-    return preprocessRichComponents(text, refs).replace(/:::writing\{([^}]*)\}\s*([\s\S]*?)\s*:::/g, (_m, meta, body) => {
+  function preprocessWritingBlocks(text, refs = [], extraData = null) {
+    return preprocessRichComponents(text, refs, extraData).replace(/:::writing\{([^}]*)\}\s*([\s\S]*?)\s*:::/g, (_m, meta, body) => {
       const attrs = {};
       for (const m of meta.matchAll(/([a-zA-Z_]+)="([^"]*)"/g)) attrs[m[1]] = m[2];
       const label = attrs.subject || attrs.title || attrs.variant || "Writing block";
@@ -312,8 +370,8 @@
     return { id, name, page, start, end, sandboxPath, messageId, urls };
   }
 
-  function renderRichText(text, refs, ctx, messageId = null) {
-    text = preprocessWritingBlocks(text, refs);
+  function renderRichText(text, refs, ctx, messageId = null, metadata = null) {
+    text = preprocessWritingBlocks(text, refs, metadata);
     // Sandbox links are files generated by ChatGPT. Replace them with a file
     // marker so content.js can try sandbox endpoints, then keep the original
     // link if no endpoint is available for the account.
@@ -476,7 +534,13 @@
         mdParts.push(t);
         htmlParts.push(`<div class="plain">${esc(t)}</div>`);
       } else {
-        const r = renderRichText(text, refs, ctx, msg.id || null);
+        // DIL citations may be bound outside metadata.content_references.
+        // Pass the full message so the renderer can resolve IDs from any
+        // message-level citation/model-data bindings without exporting them.
+        const r = renderRichText(text, refs, ctx, msg.id || null, {
+          message: msg,
+          conversation: options.citationData || null,
+        });
         if (r.md) mdParts.push(r.md);
         if (r.html.trim()) htmlParts.push(r.html);
       }
@@ -600,7 +664,9 @@
     let totalThinkingSeconds = 0;
     for (const msg of linearize(conv, nodeId)) {
       if (!isVisible(msg)) continue;
-      const r = renderMessage(msg, ctx, options);
+      // Some ChatGPT builds put citation/model-data bindings on the
+      // conversation response rather than on each individual message.
+      const r = renderMessage(msg, ctx, { ...options, citationData: conv });
       if (!r) continue;
       if (r.kind === "thinking") {
         totalThinkingSeconds += r.seconds || 0;
