@@ -977,6 +977,21 @@
       const r=await tryApiGet(`/backend-api/gizmos/${encodeURIComponent(projectId)}/conversations?cursor=${encodeURIComponent(cursor)}`,accountId,'project_conversations');
       if(!r.ok) break; fetched=true; const data=r.data; const batch=data.items||data.conversations||[];out.push(...batch);if(batch.length)onCount(out.length,batch); cursor=data.cursor||data.next_cursor||null;if(cursor)await jobSleep(DELAY_MS);
     }
+    // A project visible in the Pinned sidebar can show its conversation links
+    // even when the project conversations endpoint omits them. The URL carries
+    // both IDs: /g/{projectId}/c/{conversationId}. Supplement, never replace,
+    // the richer API records with these lightweight sidebar entries.
+    try{
+      const known=new Set(out.map(x=>x&&(x.conversation_id||x.id)).filter(Boolean));
+      for(const link of document.querySelectorAll('a[href*="/g/"]')){
+        const href=link.getAttribute('href')||'';
+        const match=href.match(/^\/g\/([^/?#]+)\/c\/([^/?#]+)/);
+        if(!match||decodeURIComponent(match[1])!==String(projectId))continue;
+        const id=decodeURIComponent(match[2]);if(!id||known.has(id))continue;
+        known.add(id);
+        out.push({id,conversation_id:id,title:(link.getAttribute('aria-label')||link.innerText||'Project conversation').trim()});
+      }
+    }catch(_){}
     const seen=new Map(); for(const x of out){const id=x&& (x.conversation_id||x.id);if(id)seen.set(id,x);} 
     if(!fetched && preview.length) setCapability('project_conversations','fallback','Using previews available in the Projects sidebar.');
     const conversations=[...seen.values()];
