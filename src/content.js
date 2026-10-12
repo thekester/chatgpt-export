@@ -927,6 +927,20 @@
       for(const it of data.items||data.gizmos||data.projects||[]){const g=(it&&it.gizmo&&it.gizmo.gizmo)||(it&&it.gizmo)||it;if(!g)continue;const id=g.id||g.gizmo_id||g.project_id;if(id&&!seen.has(id)){seen.add(id);projects.push({...g,_cgxSidebarItem:it});}}
       cursor=data.cursor||data.next_cursor||null; if(cursor)await jobSleep(DELAY_MS);
     } while(cursor);
+    // Pinned projects can be omitted from the Projects sidebar API even while
+    // ChatGPT renders them in its navigation. Merge those visible local
+    // projects in so their conversations still reach the normal project scan,
+    // export, and per-conversation deletion flows.
+    try{
+      for(const container of document.querySelectorAll('[data-sidebar-project-container][data-sidebar-project-kind="local"]')){
+        const row=container.querySelector('[data-sidebar-project-row][data-sidebar-project-id]')||container.querySelector('[data-sidebar-project-id]');
+        const id=row&&row.getAttribute('data-sidebar-project-id');
+        if(!id||seen.has(id))continue;
+        const name=(row.getAttribute('data-sidebar-project-label')||row.innerText||'').trim();
+        seen.add(id);
+        projects.push({id,name:name||'Project',_cgxSidebarItem:{}});
+      }
+    }catch(_){}
     if(!projects.length && !capabilityState.projects_list) setCapability('projects_list','unavailable','No Projects endpoint available or no Project exists in this workspace.');
     return projects;
   }
