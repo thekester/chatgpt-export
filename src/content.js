@@ -984,6 +984,25 @@
     }
   }
 
+  // The pinned-items sidebar is a separate ChatGPT surface: standalone pinned
+  // chats can be absent from /backend-api/conversations. Keep these distinct
+  // from project conversations (a pinned project is still scanned as a project).
+  function listPinnedConversations(accountId){
+    const out=[],seen=new Set();
+    try{
+      for(const row of document.querySelectorAll('[data-pinned-content-tab-drop-key^="chatgpt:conversation:"]')){
+        const key=row.getAttribute('data-pinned-content-tab-drop-key')||'';
+        const id=key.slice('chatgpt:conversation:'.length).trim();
+        if(!id||seen.has(id))continue;
+        seen.add(id);
+        const label=row.querySelector('[data-sidebar-item-label], [data-sidebar-item-title]');
+        const title=((label&&label.textContent)||row.innerText||'').split(/\r?\n/).map(s=>s.trim()).filter(s=>s&&!/^dés?épingler|^unpin|^remove from pins/i.test(s))[0]||'Pinned conversation';
+        out.push({conversation_id:id,title,_cgxPinned:true,_cgxArchived:false,_cgxAccountId:accountId});
+      }
+    }catch(_){}
+    return out;
+  }
+
   function timeMs(v){if(v==null)return 0;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:0;}
 
   // Conversation ids are global, so one conversation can only appear once.
@@ -995,7 +1014,7 @@
     for(const x of found){
       const id=x.conversation_id||x.id;if(!id)continue;
       const prev=byId.get(id);
-      byId.set(id,prev?{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived)}:x);
+      byId.set(id,prev?{...x,...prev,_cgxShared:!!(prev._cgxShared||x._cgxShared),_cgxShareId:prev._cgxShareId||x._cgxShareId,_cgxProjectId:prev._cgxProjectId||x._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||x._cgxProjectTitle,_cgxArchived:!!(prev._cgxArchived||x._cgxArchived),_cgxPinned:!!(prev._cgxPinned||x._cgxPinned)}:x);
     }
     return[...byId.values()];
   }
@@ -1039,6 +1058,8 @@
         const accountId=accounts[accountNo], accountLabel=accounts.length>1?`workspace ${accountNo+1}/${accounts.length}: `:'';
         stage=`${accountLabel}scanning active conversations`;announce();
         const active=await listRegular(accountId,false,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:false,_cgxAccountId:accountId})));});
+        const pinned=listPinnedConversations(accountId);
+        if(pinned.length){found.push(...pinned);onItems(pinned);announce();}
         if(isAccountAlias(scannedSets,active)){aliases.add(accountId);setCapability('workspace_alias','detected',`Account ${accountNo+1} is an alias of an already scanned workspace; skipped.`);continue;}
         for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}scanning archived conversations`;announce();
@@ -1219,7 +1240,7 @@
   function managerWasDeleted(item){const id=managerConversationId(item);return managerDeletedDuringScan.has(`key:${managerItemKey(item)}`)||(id!=null&&managerDeletedDuringScan.has(`id:${id}`));}
   function managerSummary(item){
     const accountId=item._cgxAccountId||null;
-    return{key:managerItemKey(item),conversationId:managerConversationId(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
+    return{key:managerItemKey(item),conversationId:managerConversationId(item),title:item.title||'Untitled',updatedAt:timeMs(item.update_time||item.create_time),archived:!!item._cgxArchived,shared:!!item._cgxShared,project:item._cgxProjectTitle||'',pinned:!!item._cgxPinned,accountId,accountLabel:accountId?`Account · ${String(accountId).slice(0,8)}`:'Current account'};
   }
   function publishPickerItems(rawItems){
     if(!rawItems||!rawItems.length)return;
@@ -1230,7 +1251,7 @@
     for(const item of rawItems){
       const id=item.conversation_id||item.id;if(!id||managerWasDeleted(item))continue;
       const prev=byId.get(id);
-      const merged=prev?{...item,...prev,_cgxArchived:!!(prev._cgxArchived||item._cgxArchived),_cgxShared:!!(prev._cgxShared||item._cgxShared),_cgxShareId:prev._cgxShareId||item._cgxShareId,_cgxProjectId:prev._cgxProjectId||item._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||item._cgxProjectTitle}:item;
+      const merged=prev?{...item,...prev,_cgxArchived:!!(prev._cgxArchived||item._cgxArchived),_cgxShared:!!(prev._cgxShared||item._cgxShared),_cgxPinned:!!(prev._cgxPinned||item._cgxPinned),_cgxShareId:prev._cgxShareId||item._cgxShareId,_cgxProjectId:prev._cgxProjectId||item._cgxProjectId,_cgxProjectTitle:prev._cgxProjectTitle||item._cgxProjectTitle}:item;
       byId.set(id,merged);published.push(merged);
     }
     managerListCache={...(managerListCache||{}),complete:false,items:[...byId.values()]};

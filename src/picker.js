@@ -6,7 +6,7 @@
 
   const FORMAT_LABELS = { both: "Markdown + HTML", md: "Markdown", html: "HTML", jex: "Joplin (.jex)" };
   const PERIODS = [["any", "Any time"], ["7", "Last 7 days"], ["30", "Last 30 days"], ["90", "Last 3 months"], ["365", "Last 12 months"], ["custom", "Custom dates…"]];
-  const PLACES = [["all", "All locations"], ["active", "Chats"], ["project", "Projects"], ["archived", "Archived"], ["shared", "Shared"]];
+  const PLACES = [["all", "All locations"], ["active", "Chats"], ["pinned", "Pinned chats"], ["project", "Projects"], ["archived", "Archived"], ["shared", "Shared"]];
   const SORTS = [["recent", "Newest first"], ["oldest", "Oldest first"], ["title-asc", "Title A-Z"], ["title-desc", "Title Z-A"]];
   const CHUNK = 150;
   const DAY = 86400000;
@@ -428,7 +428,8 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       if (from !== -Infinity || to !== Infinity) {
         if (!item.updatedAt || item.updatedAt < from || item.updatedAt > to) return false;
       }
-      if (place === "active") return !item.archived && !item.shared && !item.project;
+      if (place === "active") return !item.archived && !item.shared && !item.project && !item.pinned;
+      if (place === "pinned") return !!item.pinned;
       if (place === "project") return !!item.project;
       if (place === "archived") return item.archived;
       if (place === "shared") return item.shared;
@@ -494,7 +495,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       const main = document.createElement("div");
       const title = document.createElement("div"); title.className = "title"; title.textContent = item.title; title.title = item.title;
       const meta = document.createElement("div"); meta.className = "meta";
-      const badges = [item.project, item.archived && "Archived", item.shared && "Shared", accounts.size > 1 && item.accountLabel].filter(Boolean);
+      const badges = [item.project, item.pinned && "Pinned", item.archived && "Archived", item.shared && "Shared", accounts.size > 1 && item.accountLabel].filter(Boolean);
       for (const text of badges) { const b = document.createElement("span"); b.className = "badge"; b.textContent = text; meta.appendChild(b); }
       main.append(title, meta);
       const date = document.createElement("time");
@@ -659,6 +660,7 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
         ...item,
         archived: !!(previous.archived || item.archived),
         shared: !!(previous.shared || item.shared),
+        pinned: !!(previous.pinned || item.pinned),
         project: item.project || previous.project || ""
       } : item);
     }
