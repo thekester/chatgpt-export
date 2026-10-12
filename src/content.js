@@ -927,18 +927,39 @@
       for(const it of data.items||data.gizmos||data.projects||[]){const g=(it&&it.gizmo&&it.gizmo.gizmo)||(it&&it.gizmo)||it;if(!g)continue;const id=g.id||g.gizmo_id||g.project_id;if(id&&!seen.has(id)){seen.add(id);projects.push({...g,_cgxSidebarItem:it});}}
       cursor=data.cursor||data.next_cursor||null; if(cursor)await jobSleep(DELAY_MS);
     } while(cursor);
-    // Pinned projects can be omitted from the Projects sidebar API even while
-    // ChatGPT renders them in its navigation. Merge those visible local
-    // projects in so their conversations still reach the normal project scan,
-    // export, and per-conversation deletion flows.
+    // Projects visible in the sidebar can be omitted from its API. Merge their
+    // rendered IDs so their conversations reach the normal project scan,
+    // export, and per-conversation deletion flows. Pinned projects live in a
+    // separate sidebar section and are handled independently below.
     try{
+      const addVisibleProject=(id,row,pinned=false)=>{
+        if(!id||seen.has(id))return;
+        const name=((row&&row.getAttribute('data-sidebar-project-label'))||
+          (row&&row.getAttribute('data-sidebar-project-name'))||
+          (row&&row.innerText)||'').trim().split(/\r?\n/).map(s=>s.trim()).filter(Boolean)[0]||'Project';
+        seen.add(id);projects.push({id,name,_cgxPinnedProject:pinned,_cgxSidebarItem:{}});
+      };
       for(const container of document.querySelectorAll('[data-sidebar-project-container][data-sidebar-project-kind="local"]')){
         const row=container.querySelector('[data-sidebar-project-row][data-sidebar-project-id]')||container.querySelector('[data-sidebar-project-id]');
         const id=row&&row.getAttribute('data-sidebar-project-id');
-        if(!id||seen.has(id))continue;
-        const name=(row.getAttribute('data-sidebar-project-label')||row.innerText||'').trim();
-        seen.add(id);
-        projects.push({id,name:name||'Project',_cgxSidebarItem:{}});
+        addVisibleProject(id,row,false);
+      }
+      // The pinned section has its own container (data-sidebar-project-container-id="pinned")
+      // and may render project rows without the "local" kind marker used above.
+      for(const section of document.querySelectorAll('[data-sidebar-project-container-id="pinned"]')){
+        for(const row of section.querySelectorAll('[data-sidebar-project-id]')){
+          addVisibleProject(row.getAttribute('data-sidebar-project-id'),row,true);
+        }
+        for(const container of section.querySelectorAll('[data-sidebar-project-container-id^="project:"]')){
+          const id=container.getAttribute('data-sidebar-project-container-id').slice('project:'.length);
+          const row=container.querySelector('[data-sidebar-project-row]')||container;
+          addVisibleProject(id,row,true);
+        }
+        // Fallback for pinned project links if the row data attributes change.
+        for(const link of section.querySelectorAll('a[href*="/g/g-p-"]')){
+          const match=(link.getAttribute('href')||'').match(/\/g\/(g-p-[^/?#]+)/);
+          if(match)addVisibleProject(match[1],link,true);
+        }
       }
     }catch(_){}
     if(!projects.length && !capabilityState.projects_list) setCapability('projects_list','unavailable','No Projects endpoint available or no Project exists in this workspace.');
