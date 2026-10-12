@@ -956,7 +956,9 @@
     }
     const seen=new Map(); for(const x of out){const id=x&& (x.conversation_id||x.id);if(id)seen.set(id,x);} 
     if(!fetched && preview.length) setCapability('project_conversations','fallback','Using previews available in the Projects sidebar.');
-    return [...seen.values()];
+    const conversations=[...seen.values()];
+    conversations._cgxComplete=fetched&&cursor==null;
+    return conversations;
   }
 
   async function listShared(accountId,onCount=()=>{}){
@@ -1009,7 +1011,7 @@
 
   async function listAll(opts,onProgress=()=>{},onItems=()=>{}){
     const startedAt=Date.now(); let stage='Connecting to the account…';
-    const found=[]; const projectsIndex=[];let observed=0;
+    const found=[]; const projectsIndex=[]; const projectDeletionCandidates=[];let observed=0;
     const elapsed=()=>{const s=Math.floor((Date.now()-startedAt)/1000);return s>=60?`${Math.floor(s/60)}m ${s%60}s`:`${s}s`;};
     const announce=count=>{if(count!=null)observed=Math.max(observed,count);else observed=Math.max(observed,found.length);onProgress(`${stage} · ${observed} found · ${elapsed()} elapsed`);};
     const heartbeat=setInterval(announce,5000);
@@ -1030,7 +1032,7 @@
         }
         const items=mergeListed(found).sort((a,b)=>timeMs(b.update_time||b.create_time)-timeMs(a.update_time||a.create_time)).slice(0,limit);
         onProgress(`${items.length} most recent active conversations found · ${elapsed()} elapsed`);
-        return{items,projectsIndex,accounts:realAccounts()};
+        return{items,projectsIndex,projectDeletionCandidates,accounts:realAccounts()};
       }
       for(let accountNo=0;accountNo<accounts.length;accountNo++){
         checkCancelled();
@@ -1050,6 +1052,7 @@
             stage=`${accountLabel}scanning project ${projectNo+1}/${projects.length}`;announce();
             let xs=[];try{xs=await listProjectConversations(p,accountId,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId})));});}catch(e){checkCancelled();setCapability('project_conversations','unavailable',e.message);}
             projectsIndex.push({id:pid,name:pname,workspace_id:accountId,conversation_count:xs.length});
+            projectDeletionCandidates.push({id:pid,name:pname,workspace_id:accountId,conversation_ids:xs.map(x=>x.conversation_id||x.id).filter(Boolean),conversations_complete:!!xs._cgxComplete});
             for(const x of xs)found.push({...x,_cgxProjectId:pid,_cgxProjectTitle:pname,_cgxAccountId:accountId});
           }
         }catch(e){checkCancelled();}
@@ -1061,7 +1064,7 @@
       let items=mergeListed(found);
       if(opts.since){const since=Number(opts.since)||0;items=items.filter(x=>timeMs(x.update_time||x.create_time)>since);}
       onProgress(`${items.length} unique conversations found · ${elapsed()} elapsed`);
-      return{items,projectsIndex,accounts:realAccounts()};
+      return{items,projectsIndex,projectDeletionCandidates,accounts:realAccounts()};
     }finally{clearInterval(heartbeat);}
   }
 
@@ -1130,7 +1133,7 @@
       download(`chatgpt-joplin-export_${stamp}_errors.log`,new Blob([diagnosticLog({result:{conversation_failures:failureDetails}})],{type:'application/json;charset=utf-8'}));
     }
     progressPercent(100,`${items.length}/${items.length} conversations · ${exported} exported · ${failed} failed · one JEX notebook ready`,items.length,items.length);
-    return{count:exported,failed,failedIds,parts:1,joplinHistory:true,failureDetails,exportedItems:succeededItems(items,failedIds)};
+    return{count:exported,failed,failedIds,parts:1,joplinHistory:true,failureDetails,exportedItems:succeededItems(items,failedIds),projectDeletionCandidates:listed.projectDeletionCandidates||[]};
   }
 
   async function storageGet(key){try{const r=await api.storage.local.get(key);return r[key];}catch(_){return null;}}
@@ -1204,7 +1207,7 @@
     progressPercent(100,'Saving export state…',items.length,items.length);
     await storageSet({'cgx-export-index':nextIndex,'cgx-last-full-export':Date.now()});
     progressPercent(100,'Export ready.',items.length,items.length);
-    return{count:items.length-totalErrors,failed:totalErrors,failedIds,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts,exportedItems:succeededItems(items,failedIds)};
+    return{count:items.length-totalErrors,failed:totalErrors,failedIds,imageFailures:totalImageFailures,fileFailures:totalFileFailures,parts,exportedItems:succeededItems(items,failedIds),projectDeletionCandidates:listed.projectDeletionCandidates||[]};
   }
   function succeededItems(items,failedIds){
     const failed=new Set((failedIds||[]).map(f=>JSON.stringify([f.accountId||'',f.id||''])));
@@ -1287,6 +1290,44 @@
       }
       progressPercent(Math.round((i+1)*100/items.length),`Automatic deletion: ${deleted}/${items.length} conversations deleted`,i+1,items.length);
       if(i+1<items.length&&!jobCancelled){try{await jobSleep(delay);}catch(error){if(!jobCancelled)throw error;}}
+    }
+    return results;
+  }
+  async function autoDeleteProjectsAfterExport(projects,exportedItems,opts={}){
+    if(!opts.autoDeleteProjectsAfterExport)return[];
+    if(opts.conversationLimit||opts.incremental)return[{name:'Projects',ok:false,skipped:true,error:'Projects were kept because limited or incremental exports cannot guarantee that every project conversation was exported.'}];
+    const exportedIds=new Set(exportedItems.map(item=>String(item.conversation_id||item.id||'')));
+    const seen=new Set(),results=[];
+    for(let index=0;index<(projects||[]).length;index++){
+      const project=projects[index];
+      if(jobCancelled){
+        for(const skipped of projects.slice(index))results.push({id:skipped.id,name:skipped.name,ok:false,skipped:true,error:'Project deletion cancelled; verify its status in ChatGPT.'});
+        break;
+      }
+      const key=`${project.workspace_id||''}:${project.id}`;
+      if(!project.id||seen.has(key))continue;
+      seen.add(key);
+      if(!String(project.id).startsWith('g-p-')){
+        results.push({id:project.id,name:project.name,ok:false,skipped:true,error:'Project was kept because its identifier is not a ChatGPT project ID.'});
+        continue;
+      }
+      const conversationIds=Array.isArray(project.conversation_ids)?project.conversation_ids:[];
+      if(!project.conversations_complete||conversationIds.some(id=>!exportedIds.has(String(id)))){
+        results.push({id:project.id,name:project.name,ok:false,skipped:true,error:'Project kept because its full conversation list was unavailable or at least one conversation was not exported successfully.'});
+        continue;
+      }
+      try{
+        await authFetch(`/backend-api/gizmos/${encodeURIComponent(project.id)}`,0,project.workspace_id||null,true,{method:'DELETE'});
+        results.push({id:project.id,name:project.name,ok:true});
+      }catch(error){
+        const cancelled=jobCancelled||error.name==='AbortError';
+        results.push({id:project.id,name:project.name,ok:false,error:cancelled?'Deletion was interrupted; verify this project in ChatGPT.':redactDiagnosticText(error.message||error),status:error.status||null});
+        if(cancelled){
+          for(const skipped of projects.slice(index+1))results.push({id:skipped.id,name:skipped.name,ok:false,skipped:true,error:'Project deletion cancelled; verify its status in ChatGPT.'});
+          break;
+        }
+      }
+      progressPercent(Math.round(results.length*100/Math.max(projects.length,1)),`Deleting projects: ${results.filter(item=>item.ok).length}/${projects.length} deleted`,results.length,projects.length);
     }
     return results;
   }
@@ -1428,12 +1469,17 @@
         if(opts.autoDeleteAfterExport){
           progressPercent(1,`Export ready. Starting automatic deletion of ${exportedItems.length} successfully exported conversations…`,0,exportedItems.length);
           try{r.autoDeleteResults=await autoDeleteExported(exportedItems,opts);}catch(error){r.autoDeleteError=redactDiagnosticText(error.message||error);r.autoDeleteResults=exportedItems.map(item=>({key:managerItemKey(item),conversationId:managerConversationId(item),title:item.title||'Untitled',ok:false,skipped:true,error:r.autoDeleteError}));}
+          if(opts.autoDeleteProjectsAfterExport){
+            try{r.autoDeleteProjectResults=await autoDeleteProjectsAfterExport(r.projectDeletionCandidates||[],exportedItems,opts);}catch(error){r.autoDeleteProjectError=redactDiagnosticText(error.message||error);r.autoDeleteProjectResults=[{name:'Projects',ok:false,error:r.autoDeleteProjectError}];}
+          }
           r.reviewCount=pendingDeletion?pendingDeletion.items.length:0;
         }
-        if(typeof globalThis.CGX_historyExportDone==='function')try{globalThis.CGX_historyExportDone({autoDeleteResults:r.autoDeleteResults||null,remainingCount:r.reviewCount});}catch(_){}
+        if(typeof globalThis.CGX_historyExportDone==='function')try{globalThis.CGX_historyExportDone({autoDeleteResults:r.autoDeleteResults||null,autoDeleteProjectResults:r.autoDeleteProjectResults||null,remainingCount:r.reviewCount});}catch(_){}
       }
+      delete r.projectDeletionCandidates;
       const autoDeleteResults=r.autoDeleteResults||[];
-      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin,reviewCount:r.reviewCount||0,autoDeleteRequested:!!opts.autoDeleteAfterExport,autoDeleted:autoDeleteResults.filter(x=>x.ok).length,autoDeleteFailed:autoDeleteResults.filter(x=>!x.ok).length};
+      const autoDeleteProjectResults=r.autoDeleteProjectResults||[];
+      lastExportState={finishedAt:Date.now(),ok:true,count:r.count||0,failed:r.failed||0,parts:r.parts||0,joplinHistory:!!r.joplinHistory,joplin:!!r.joplin,reviewCount:r.reviewCount||0,autoDeleteRequested:!!opts.autoDeleteAfterExport,autoDeleted:autoDeleteResults.filter(x=>x.ok).length,autoDeleteFailed:autoDeleteResults.filter(x=>!x.ok).length,autoDeleteProjectsRequested:!!opts.autoDeleteProjectsAfterExport&&Array.isArray(r.autoDeleteProjectResults),autoDeletedProjects:autoDeleteProjectResults.filter(x=>x.ok).length,autoDeleteProjectsFailed:autoDeleteProjectResults.filter(x=>!x.ok).length};
       sendResponse({ok:true,...r,diagnostics:hasIssues?diagnosticSnapshot({result:{failed:r.failed||0,image_failures:r.imageFailures||0,file_failures:r.fileFailures||0,parts:r.parts||0}}):null});
     }).catch(e=>{
       diag('export.failure',{error:e});

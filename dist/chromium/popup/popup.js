@@ -6,6 +6,9 @@ const btnPick = $("pick");
 const btnReview = $("review-delete");
 const historyExportDialog = $("history-export-dialog");
 const autoDeleteAfterExport = $("auto-delete-after-export");
+const autoDeleteProjects = $("auto-delete-projects");
+const autoDeleteProjectsRow = $("auto-delete-projects-row");
+const deleteProjectsWarning = $("delete-projects-warning");
 const confirmAutoDeleteRow = $("confirm-auto-delete-row");
 const confirmAutoDelete = $("confirm-auto-delete");
 const startHistoryExport = $("start-history-export");
@@ -472,7 +475,10 @@ function showFinishedExport(job) {
   const deletionMessage = job.autoDeleteRequested
     ? ` Automatic deletion succeeded for ${job.autoDeleted || 0} conversation(s).${job.autoDeleteFailed ? ` ${job.autoDeleteFailed} remain undeleted.` : ""} Removed conversations may take up to 10 minutes to disappear from history.`
     : "";
-  setStatus(`${message}${job.failed ? ` ${job.failed} export(s) failed; check the downloaded errors report and diagnostic log.` : ""}${deletionMessage}`, !!(job.failed || job.autoDeleteFailed));
+  const projectDeletionMessage = job.autoDeleteProjectsRequested
+    ? ` Project deletion succeeded for ${job.autoDeletedProjects || 0} project(s).${job.autoDeleteProjectsFailed ? ` ${job.autoDeleteProjectsFailed} were kept or could not be deleted; see the export result.` : ""}`
+    : "";
+  setStatus(`${message}${job.failed ? ` ${job.failed} export(s) failed; check the downloaded errors report and diagnostic log.` : ""}${deletionMessage}${projectDeletionMessage}`, !!(job.failed || job.autoDeleteFailed || job.autoDeleteProjectsFailed));
   updateActivity([{ label: job.autoDeleteRequested ? `Export complete; automatic deletion succeeded for ${job.autoDeleted || 0} conversation(s).` : (job.failed ? `Export completed with ${job.failed} failed conversation(s).` : "Export completed successfully.") }]);
   offerReview(job.reviewCount || 0);
 }
@@ -576,12 +582,17 @@ async function run(type, optionOverrides = {}) {
       const failedDeletes = r.autoDeleteResults.length - deleted;
       text += ` Automatic deletion succeeded for ${deleted} conversation(s).${failedDeletes ? ` ${failedDeletes} remain undeleted; use Review to inspect them.` : ""} Removed conversations may take up to 10 minutes to disappear from history.`;
     }
+    if (Array.isArray(r.autoDeleteProjectResults)) {
+      const deleted = r.autoDeleteProjectResults.filter((entry) => entry.ok).length;
+      const failedDeletes = r.autoDeleteProjectResults.length - deleted;
+      text += ` Project deletion succeeded for ${deleted} project(s).${failedDeletes ? ` ${failedDeletes} project(s) were kept or could not be deleted.` : ""}`;
+    }
     showProgress(100);
-    const hasIssues = !!(r.failed || r.imageFailures || r.fileFailures || (r.autoDeleteResults && r.autoDeleteResults.some((entry) => !entry.ok)));
+    const hasIssues = !!(r.failed || r.imageFailures || r.fileFailures || (r.autoDeleteResults && r.autoDeleteResults.some((entry) => !entry.ok)) || (r.autoDeleteProjectResults && r.autoDeleteProjectResults.some((entry) => !entry.ok)));
     if (hasIssues) {
       prepareDiagnosticLog({
         remote: r.diagnostics || null,
-        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, automatic_deletions_failed: r.autoDeleteResults ? r.autoDeleteResults.filter((entry) => !entry.ok).length : 0, count: r.count || 0, parts: r.parts || 0, conversation_failures: r.failureDetails || [] }
+        result: { failed: r.failed || 0, image_failures: r.imageFailures || 0, file_failures: r.fileFailures || 0, automatic_deletions_failed: r.autoDeleteResults ? r.autoDeleteResults.filter((entry) => !entry.ok).length : 0, project_deletions_failed: r.autoDeleteProjectResults ? r.autoDeleteProjectResults.filter((entry) => !entry.ok).length : 0, count: r.count || 0, parts: r.parts || 0, conversation_failures: r.failureDetails || [] }
       });
       text += " Diagnostic log available below.";
     }
@@ -625,27 +636,60 @@ optHistoryCount.addEventListener("input", updateFormatUI);
 btnCurrent.addEventListener("click", () => run("cgx-export-current"));
 btnAll.addEventListener("click", () => {
   autoDeleteAfterExport.checked = false;
+  autoDeleteProjects.checked = false;
+  autoDeleteProjects.disabled = projectDeleteUnavailable();
+  deleteProjectsWarning.hidden = true;
   confirmAutoDelete.checked = false;
+  autoDeleteProjectsRow.hidden = true;
   confirmAutoDeleteRow.hidden = true;
   startHistoryExport.disabled = false;
   historyExportDialog.showModal();
 });
 $("cancel-history-export").addEventListener("click", () => historyExportDialog.close());
+function updateHistoryDeleteOptions() {
+  const deleteChats = autoDeleteAfterExport.checked;
+  autoDeleteProjectsRow.hidden = !deleteChats;
+  autoDeleteProjects.disabled = projectDeleteUnavailable();
+  if (autoDeleteProjects.disabled) autoDeleteProjects.checked = false;
+  deleteProjectsWarning.hidden = !(deleteChats && autoDeleteProjects.checked);
+  confirmAutoDeleteRow.hidden = !deleteChats;
+  if (!deleteChats) {
+    autoDeleteProjects.checked = false;
+    confirmAutoDelete.checked = false;
+    deleteProjectsWarning.hidden = true;
+  }
+  startHistoryExport.disabled = deleteChats && !confirmAutoDelete.checked;
+}
+function projectDeleteUnavailable() {
+  return optLimit.checked || (selectedFormat() !== "jex" && optIncremental.checked);
+}
 autoDeleteAfterExport.addEventListener("change", () => {
-  confirmAutoDeleteRow.hidden = !autoDeleteAfterExport.checked;
-  if (!autoDeleteAfterExport.checked) confirmAutoDelete.checked = false;
-  startHistoryExport.disabled = autoDeleteAfterExport.checked && !confirmAutoDelete.checked;
+  updateHistoryDeleteOptions();
+});
+autoDeleteProjects.addEventListener("change", () => {
+  deleteProjectsWarning.hidden = !autoDeleteProjects.checked;
 });
 confirmAutoDelete.addEventListener("change", () => {
   startHistoryExport.disabled = autoDeleteAfterExport.checked && !confirmAutoDelete.checked;
 });
+optLimit.addEventListener("change", () => {
+  if (historyExportDialog.open) updateHistoryDeleteOptions();
+});
+optIncremental.addEventListener("change", () => {
+  if (historyExportDialog.open) updateHistoryDeleteOptions();
+});
+formatInputs.forEach((el) => el.addEventListener("change", () => {
+  if (historyExportDialog.open) updateHistoryDeleteOptions();
+}));
 startHistoryExport.addEventListener("click", () => {
   if (autoDeleteAfterExport.checked && !confirmAutoDelete.checked) return;
   const autoDelete = autoDeleteAfterExport.checked;
+  const autoDeleteProjectsValue = autoDelete && autoDeleteProjects.checked && !autoDeleteProjects.disabled;
   historyExportDialog.close();
   run("cgx-export-all", {
     conversationLimit: optLimit.checked ? historyLimit() : 0,
-    autoDeleteAfterExport: autoDelete
+    autoDeleteAfterExport: autoDelete,
+    autoDeleteProjectsAfterExport: autoDeleteProjectsValue
   });
 });
 // Opens the large conversation picker inside the ChatGPT page, then closes

@@ -855,15 +855,18 @@ input[type=checkbox] { width: 16px; height: 16px; margin: 0; accent-color: var(-
       () => openConfirm("after-export", keys, exportInfo), true);
   }
 
-  globalThis.CGX_historyExportDone = ({ autoDeleteResults = null, remainingCount = 0 } = {}) => {
+  globalThis.CGX_historyExportDone = ({ autoDeleteResults = null, autoDeleteProjectResults = null, remainingCount = 0 } = {}) => {
     if (!globalThis.CGX_core) return;
     if (!host || !host.isConnected) build();
     detectTheme();
     if (Array.isArray(autoDeleteResults)) {
       const deleted = autoDeleteResults.filter((entry) => entry.ok).length;
       const failed = autoDeleteResults.length - deleted;
-      const summary = `History export finished. Automatic deletion succeeded for ${plural(deleted, "conversation")}.${failed ? ` ${plural(failed, "conversation")} remain undeleted.` : ""}`;
-      if (open) showBanner(summary, failed ? "error" : "ok");
+      const projectDeleted = Array.isArray(autoDeleteProjectResults) ? autoDeleteProjectResults.filter((entry) => entry.ok).length : 0;
+      const projectFailed = Array.isArray(autoDeleteProjectResults) ? autoDeleteProjectResults.length - projectDeleted : 0;
+      const projectSummary = Array.isArray(autoDeleteProjectResults) ? ` Project deletion succeeded for ${plural(projectDeleted, "project")}.${projectFailed ? ` ${plural(projectFailed, "project")} were kept or could not be deleted.` : ""}` : "";
+      const summary = `History export finished. Automatic deletion succeeded for ${plural(deleted, "conversation")}.${failed ? ` ${plural(failed, "conversation")} remain undeleted.` : ""}${projectSummary}`;
+      if (open) showBanner(summary, failed || projectFailed ? "error" : "ok");
       pillAction = remainingCount ? openReview : null;
       el.show.textContent = remainingCount ? "Review remaining" : "Show";
       el.pill.hidden = false;
