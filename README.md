@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.54**
+Current version: **0.6.55**
 
-This version supplements each project's API conversation list with matching visible sidebar links (`/g/{projectId}/c/{conversationId}`). This captures visible chats in pinned projects when the project endpoint omits them. It also fixes sidebar project discovery by using ChatGPT's actual `data-sidebar-project-kind="local"` marker. Standalone pinned chats remain a separate picker category.
+This version fixes sidebar project discovery using ChatGPT's actual `data-app-action-sidebar-project-id` and `data-app-action-sidebar-project-label` row attributes together with `data-sidebar-project-kind="local"`. It supplements each project's API conversation list with visible sidebar links (`/g/{projectId}/c/{conversationId}`), including conversations in pinned projects that the API omits. Standalone pinned chats remain a separate picker category.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.

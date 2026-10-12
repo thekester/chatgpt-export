@@ -934,7 +934,8 @@
     try{
       const addVisibleProject=(id,row,pinned=false)=>{
         if(!id||seen.has(id))return;
-        const name=((row&&row.getAttribute('data-sidebar-project-label'))||
+        const name=((row&&row.getAttribute('data-app-action-sidebar-project-label'))||
+          (row&&row.getAttribute('data-sidebar-project-label'))||
           (row&&row.getAttribute('data-sidebar-project-name'))||
           (row&&row.innerText)||'').trim().split(/\r?\n/).map(s=>s.trim()).filter(Boolean)[0]||'Project';
         seen.add(id);projects.push({id,name,_cgxPinnedProject:pinned,_cgxSidebarItem:{}});
@@ -942,15 +943,15 @@
       // ChatGPT's current project nodes expose kind + container-id, but not a
       // data-sidebar-project-container attribute (pinned or otherwise).
       for(const container of document.querySelectorAll('[data-sidebar-project-kind="local"]')){
-        const row=container.querySelector('[data-sidebar-project-row][data-sidebar-project-id]')||container.querySelector('[data-sidebar-project-id]');
-        const id=row&&row.getAttribute('data-sidebar-project-id');
+        const row=container.querySelector('[data-app-action-sidebar-project-row][data-app-action-sidebar-project-id]')||container.querySelector('[data-sidebar-project-row][data-sidebar-project-id]')||container.querySelector('[data-app-action-sidebar-project-id], [data-sidebar-project-id]');
+        const id=row&&(row.getAttribute('data-app-action-sidebar-project-id')||row.getAttribute('data-sidebar-project-id'));
         addVisibleProject(id,row,!!container.closest('[data-sidebar-project-container-id="pinned"]'));
       }
       // The pinned section has its own container (data-sidebar-project-container-id="pinned")
       // and may render project rows without the "local" kind marker used above.
       for(const section of document.querySelectorAll('[data-sidebar-project-container-id="pinned"]')){
-        for(const row of section.querySelectorAll('[data-sidebar-project-id]')){
-          addVisibleProject(row.getAttribute('data-sidebar-project-id'),row,true);
+        for(const row of section.querySelectorAll('[data-app-action-sidebar-project-id], [data-sidebar-project-id]')){
+          addVisibleProject(row.getAttribute('data-app-action-sidebar-project-id')||row.getAttribute('data-sidebar-project-id'),row,true);
         }
         for(const container of section.querySelectorAll('[data-sidebar-project-container-id^="project:"]')){
           const id=container.getAttribute('data-sidebar-project-container-id').slice('project:'.length);
