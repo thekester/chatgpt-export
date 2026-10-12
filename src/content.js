@@ -939,10 +939,12 @@
           (row&&row.innerText)||'').trim().split(/\r?\n/).map(s=>s.trim()).filter(Boolean)[0]||'Project';
         seen.add(id);projects.push({id,name,_cgxPinnedProject:pinned,_cgxSidebarItem:{}});
       };
-      for(const container of document.querySelectorAll('[data-sidebar-project-container][data-sidebar-project-kind="local"]')){
+      // ChatGPT's current project nodes expose kind + container-id, but not a
+      // data-sidebar-project-container attribute (pinned or otherwise).
+      for(const container of document.querySelectorAll('[data-sidebar-project-kind="local"]')){
         const row=container.querySelector('[data-sidebar-project-row][data-sidebar-project-id]')||container.querySelector('[data-sidebar-project-id]');
         const id=row&&row.getAttribute('data-sidebar-project-id');
-        addVisibleProject(id,row,false);
+        addVisibleProject(id,row,!!container.closest('[data-sidebar-project-container-id="pinned"]'));
       }
       // The pinned section has its own container (data-sidebar-project-container-id="pinned")
       // and may render project rows without the "local" kind marker used above.

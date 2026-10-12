@@ -164,8 +164,8 @@ Private reasoning and hidden internal tool calls are not exported: only content 
 
 ## Version
 
-Current version: **0.6.52**
+Current version: **0.6.53**
 
-This version also discovers projects rendered inside ChatGPT's separate Pinned sidebar section, in addition to the Projects section/API, so their conversations reach project export and deletion flows. Standalone pinned chats remain a separate picker category. It also adds an explicit option to delete projects after a full history export, warns that project deletion also removes chats, instructions, and project-only files (not included in the export), keeps projects whose conversation scan or export is incomplete, and disables project deletion for limited or incremental exports. JEX notes remain Markdown-first, with HTML breaks between Markdown table rows fixed for Joplin.
+This version fixes sidebar project discovery by using the actual `data-sidebar-project-kind="local"` marker (ChatGPT does not render the additionally required container attribute). This makes projects such as Coastseg, including pinned projects, available to project conversation export. Standalone pinned chats remain a separate picker category. The project deletion option, safety checks, and Joplin export fixes are unchanged.
 
 Earlier `0.6.39` changes include removing em dashes from project text and the extension interface, shortening the manifest description to meet Chrome Web Store's 132-character limit, updating the extension icon, improving selected conversation deletion during a history scan, de-duplicating deleted conversations, and clarifying that a deletion request may take up to 10 minutes to disappear from ChatGPT history. The picker avoids dynamic `innerHTML` assignment, and Firefox minimum versions match the declared manifest capabilities.
