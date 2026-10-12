@@ -1042,6 +1042,29 @@
     return out;
   }
 
+  // Project conversation links are independently available in the rendered
+  // sidebar. Collect them as a last-mile fallback even if project enumeration
+  // or the per-project API endpoint fails to return the pinned project.
+  function listVisibleProjectConversations(accountId){
+    const out=[],seen=new Set();
+    try{
+      for(const link of document.querySelectorAll('a[href*="/g/"][href*="/c/"]')){
+        const href=link.getAttribute('href')||'';
+        const match=href.match(/^\/g\/([^/?#]+)\/c\/([^/?#]+)/);
+        if(!match)continue;
+        const projectId=decodeURIComponent(match[1]),id=decodeURIComponent(match[2]);
+        if(!projectId.startsWith('g-p-')||!id||seen.has(id))continue;
+        seen.add(id);
+        const container=link.closest('[data-sidebar-project-kind="local"]');
+        const projectRow=container&&container.querySelector('[data-app-action-sidebar-project-id]');
+        const projectTitle=projectRow&&(projectRow.getAttribute('data-app-action-sidebar-project-label')||projectRow.innerText);
+        const title=(link.getAttribute('aria-label')||link.innerText||'Project conversation').trim();
+        out.push({id,conversation_id:id,title,_cgxProjectId:projectId,_cgxProjectTitle:(projectTitle||'').trim()||'Project',_cgxAccountId:accountId});
+      }
+    }catch(_){}
+    return out;
+  }
+
   function timeMs(v){if(v==null)return 0;if(typeof v==='number')return v>1e12?v:v*1000;const t=Date.parse(v);return Number.isFinite(t)?t:0;}
 
   // Conversation ids are global, so one conversation can only appear once.
@@ -1103,6 +1126,8 @@
         for(const x of active)found.push({...x,_cgxArchived:false,_cgxAccountId:accountId});announce();
         stage=`${accountLabel}scanning archived conversations`;announce();
         const archived=await listRegular(accountId,true,(count,batch)=>{announce(found.length+count);if(batch)onItems(batch.map(x=>({...x,_cgxArchived:true,_cgxAccountId:accountId})));}); for(const x of archived)found.push({...x,_cgxArchived:true,_cgxAccountId:accountId});announce();
+        const visibleProjectConversations=listVisibleProjectConversations(accountId);
+        if(visibleProjectConversations.length){found.push(...visibleProjectConversations);onItems(visibleProjectConversations);announce();}
         stage=`${accountLabel}finding projects`;announce();
         try{
           const projects=await listProjects(accountId);
